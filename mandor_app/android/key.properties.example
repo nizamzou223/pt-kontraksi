@@ -1,0 +1,6 @@
+# Salin menjadi key.properties (JANGAN di-commit). Buat keystore sekali:
+#   keytool -genkey -v -keystore C:\keys\kalipelus-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias kalipelus
+storePassword=GANTI_PASSWORD_KEYSTORE
+keyPassword=GANTI_PASSWORD_KEY
+keyAlias=kalipelus
+storeFile=C:\keys\kalipelus-release.jks

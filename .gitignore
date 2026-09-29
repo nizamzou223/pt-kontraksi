@@ -1,0 +1,8 @@
+# Repo ini hanya berisi 3 folder kode. Semua yang lain di root (laporan KP/TA,
+# file Office sementara, folder kerja skill, dll) sengaja tidak diikutkan.
+/*
+!/admin-web/
+!/mandor_app/
+!/sistem_cerdas_app/
+!/.gitignore
+!/README.md

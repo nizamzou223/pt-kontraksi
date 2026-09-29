@@ -1,0 +1,24 @@
+# Eksperimen peramalan kebutuhan material
+
+_Dibuat 2026-09-25T16:58:28.079Z • Node v22.16.0 • benih 1..3 • sumber: sintetis_
+
+Data: **sintetis** (generator berbenih), 18 barang × 52 minggu; horizon 4 minggu; validasi *rolling-origin* pada 6 titik asal terakhir; nilai = rata-rata ± simpangan baku lintas 3 benih.
+
+| Model | Jenis | MASE | RMSE | WAPE | Bias | Peringkat rata-rata | Kemenangan/benih |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Gradient Boosting global + tenaga kerja | global | 0,887 ± 0,201 | 21,12 ± 5,26 | 86,4% | 1,43 | 1,96 | 12,3 |
+| Naive (nilai terakhir) | lokal | 1,143 ± 0,227 | 28,25 ± 5,83 | 105,1% | 5,30 | 4,98 | 2,0 |
+| Exponential Smoothing (SES) | lokal | 1,200 ± 0,119 | 21,10 ± 2,51 | 110,3% | 7,87 | 5,22 | 0,0 |
+| Rata-rata bergerak 4 minggu | lokal | 1,277 ± 0,194 | 22,09 ± 2,98 | 109,9% | 6,86 | 5,07 | 0,7 |
+| Random Forest lag-4 (metode lama) *(metode lama)* | lokal | 1,340 ± 0,112 | 23,59 ± 2,27 | 116,9% | 8,43 | 5,65 | 1,3 |
+| Croston-SBA | lokal | 1,348 ± 0,143 | 21,35 ± 2,84 | 110,6% | 7,23 | 4,13 | 1,7 |
+| Croston | lokal | 1,456 ± 0,147 | 22,06 ± 2,74 | 116,9% | 8,37 | 6,13 | 0,0 |
+| Gradient Boosting global | global | 1,482 ± 0,121 | 26,61 ± 5,06 | 128,5% | 10,41 | 6,81 | 0,0 |
+| Random Forest global | global | 1,499 ± 0,153 | 24,65 ± 2,61 | 126,7% | 10,32 | 7,15 | 0,0 |
+| TSB | lokal | 1,528 ± 0,131 | 24,06 ± 2,67 | 129,3% | 10,79 | 7,89 | 0,0 |
+
+**Model terbaik (MASE rata-rata):** Gradient Boosting global + tenaga kerja (0,887).
+**Perbandingan dengan metode lama** (Random Forest lag-4 pada halaman Prediksi Stok): MASE 1,340 → 0,887 (33,8% lebih baik).
+
+> MASE < 1 = lebih baik daripada ramalan *naive*. WAPE = Σ|galat| ÷ Σ realisasi.
+> **Catatan kejujuran:** pada data sintetis ini kebutuhan sengaja dibuat bergantung pada jumlah tenaga kerja, sehingga model yang memakai fitur tenaga kerja diuntungkan. Hasil ini memeriksa mekanisme, bukan membuktikan kinerja di lapangan.

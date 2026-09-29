@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.vite/
+.env
+.env.*
+!.env.example
+coverage/
+.vercel
+
+# Hasil eksperimen pada DATA NYATA (berisi data bisnis) — jangan di-commit
+ml-experiments/hasil/data-nyata-*
