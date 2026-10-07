@@ -68,10 +68,10 @@ export default function LaporanBarang() {
     try {
       const pid = parseInt(selectedProject)
       const [brg, sm, sk, kritis] = await Promise.all([
-        inventoryService.getBarang(pid),
+        inventoryService.getBarang(),
         inventoryService.getStokMasuk(pid),
         inventoryService.getStokKeluar(pid),
-        inventoryService.getStokKritis(pid),
+        inventoryService.getStokKritis(),
       ])
       setBarang(brg)
       setAllMasuk(sm)
@@ -215,7 +215,7 @@ export default function LaporanBarang() {
               { label: 'Jenis Barang', val: barang.length, color: 'bg-blue-50 border-blue-100 text-blue-700', icon: Package },
               { label: `Qty Masuk ${tahun}`, val: totalQtyMasukTahun, color: 'bg-green-50 border-green-100 text-green-700', icon: ArrowDownRight },
               { label: `Qty Keluar ${tahun}`, val: totalQtyKeluarTahun, color: 'bg-red-50 border-red-100 text-red-700', icon: ArrowUpRight },
-              { label: 'Stok Kritis', val: stokKritis.length, color: stokKritis.length > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-gray-50 border-gray-100 text-gray-500', icon: AlertTriangle },
+              { label: 'Stok Kritis (Gudang Pusat)', val: stokKritis.length, color: stokKritis.length > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-gray-50 border-gray-100 text-gray-500', icon: AlertTriangle },
             ].map((s, i) => (
               <div key={i} className={`rounded-2xl border p-4 flex items-center gap-3 transition-all hover:shadow-md ${s.color} animate-slideUp`}>
                 <div className="w-9 h-9 rounded-xl bg-white/70 flex items-center justify-center flex-shrink-0 shadow-sm">

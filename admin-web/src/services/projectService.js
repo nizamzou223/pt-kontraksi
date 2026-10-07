@@ -1,4 +1,5 @@
 import supabase from './supabaseClient'
+import { today } from '../utils/autoFill'
 
 const parseError = (error) => {
   const msg = error?.message || ''
@@ -61,7 +62,7 @@ export const projectService = {
   // === KARYAWAN ===
   async getKaryawan(filters = {}) {
     let query = supabase.from('karyawan')
-      .select('*, id_karyawan, jabatan(*), departemen(*)')
+      .select('*, jabatan(*), departemen(*)')
       .order('nama_karyawan')
     if (filters.status_aktif !== undefined) query = query.eq('status_aktif', filters.status_aktif)
     if (filters.departemen_id) query = query.eq('departemen_id', filters.departemen_id)
@@ -72,21 +73,21 @@ export const projectService = {
   },
   async getKaryawanById(id) {
     const { data, error } = await supabase.from('karyawan')
-      .select('*, id_karyawan, jabatan(*), departemen(*), karyawan_qr_code(*)')
+      .select('*, jabatan(*), departemen(*), karyawan_qr_code(*)')
       .eq('id', id).single()
     if (error) throw new Error(parseError(error))
     return data
   },
   async createKaryawan(payload) {
     const { data, error } = await supabase.from('karyawan')
-      .insert(payload).select('*, id_karyawan, jabatan(*), departemen(*)').single()
+      .insert(payload).select('*, jabatan(*), departemen(*)').single()
     if (error) throw new Error(parseError(error))
     return data
   },
   async updateKaryawan(id, payload) {
     const { data, error } = await supabase.from('karyawan')
       .update({ ...payload, updated_at: new Date().toISOString() })
-      .eq('id', id).select('*, id_karyawan, jabatan(*), departemen(*)').single()
+      .eq('id', id).select('*, jabatan(*), departemen(*)').single()
     if (error) throw new Error(parseError(error))
     return data
   },
@@ -156,7 +157,9 @@ export const projectService = {
     if (presensiCount > 0)
       throw new Error(`Project tidak bisa dihapus karena memiliki ${presensiCount} data presensi. Ubah status project menjadi "selesai" saja.`)
     await supabase.from('project_karyawan').delete().eq('project_id', id)
-    await supabase.from('kategori_barang').delete().eq('project_id', id)
+    // kategori_barang sekarang global (gudang pusat, lihat FIX_GUDANG_PUSAT.sql)
+    // -- sudah tidak ada project_id, dan memang tidak boleh ikut terhapus
+    // hanya karena satu project dihapus (dipakai bersama project lain).
     const { error } = await supabase.from('project').delete().eq('id', id)
     if (error) throw new Error(parseError(error))
   },
@@ -194,13 +197,19 @@ export const projectService = {
     const [karyawan, project, presensi, kasbon] = await Promise.all([
       supabase.from('karyawan').select('id', { count: 'exact' }).eq('status_aktif', true),
       supabase.from('project').select('id', { count: 'exact' }).eq('status_project', 'aktif'),
-      supabase.from('presensi').select('id', { count: 'exact' }).eq('tanggal', new Date().toISOString().split('T')[0]),
+      supabase.from('presensi').select('status_kehadiran').eq('tanggal', today()),
       supabase.from('kasbon').select('sisa_kasbon').eq('status_lunas', false),
     ])
+    const totalKaryawan = karyawan.count || 0
+    const presensiRows = presensi.data || []
+    const hadirHariIni = presensiRows.filter(p => p.status_kehadiran === 'hadir' || p.status_kehadiran === 'belum_lengkap').length
+    const belumAbsenHariIni = Math.max(0, totalKaryawan - presensiRows.length)
     return {
-      totalKaryawan: karyawan.count || 0,
+      totalKaryawan,
       totalProjectAktif: project.count || 0,
-      presensiHariIni: presensi.count || 0,
+      presensiHariIni: presensiRows.length,
+      hadirHariIni,
+      belumAbsenHariIni,
       totalKasbon: kasbon.data?.reduce((s, k) => s + parseFloat(k.sisa_kasbon || 0), 0) || 0,
     }
   }

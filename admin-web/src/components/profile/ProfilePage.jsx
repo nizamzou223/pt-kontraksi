@@ -440,9 +440,9 @@ export default function ProfilePage() {
                 </span>
               )}
             </div>
-            {karyawan?.nik && (
+            {karyawan?.kode_karyawan != null && (
               <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '11px', marginTop: '6px' }}>
-                NIK: {karyawan.nik}
+                Kode Karyawan: {karyawan.kode_karyawan}
               </p>
             )}
           </div>
@@ -457,9 +457,9 @@ export default function ProfilePage() {
           <InfoRow icon={Mail}      label={s.email}    value={displayUser?.email}        c={c} />
           <div style={{ borderTop: `1px solid ${c.border}` }} />
           <InfoRow icon={Shield}    label={s.role}     value={roleLabel}                 c={c} valueColor={c.brandText} />
-          {karyawan?.nik && <>
+          {karyawan?.kode_karyawan != null && <>
             <div style={{ borderTop: `1px solid ${c.border}` }} />
-            <InfoRow icon={BadgeCheck} label={s.nik}  value={karyawan.nik}              c={c} />
+            <InfoRow icon={BadgeCheck} label={s.kodeKaryawan}  value={karyawan.kode_karyawan}              c={c} />
           </>}
           <div style={{ borderTop: `1px solid ${c.border}` }} />
           <InfoRow icon={CheckCircle} label={s.status}

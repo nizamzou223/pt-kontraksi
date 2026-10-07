@@ -4,7 +4,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Brain, AlertTriangle, PackageX, RefreshCw, BarChart2 } from 'lucide-react'
 import { Card, Table, PageHeader, DropdownSelect, Modal } from '../common'
 import { predictionService } from '../../services/predictionService'
-import { useProject } from '../../context/ProjectContext'
 
 const HORIZON_OPTIONS = [
   { value: '2', label: '2 minggu ke depan' },
@@ -20,20 +19,18 @@ function getStatus(r) {
 }
 
 export default function PrediksiStok() {
-  const { activeProject } = useProject()
   const [horizon, setHorizon] = useState('4')
   const [hasil, setHasil] = useState([])
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState(null)
 
   const load = useCallback(async () => {
-    if (!activeProject?.id) return
     setLoading(true)
     try {
-      const data = await predictionService.prediksiSemuaBarang(activeProject.id, { horizon: parseInt(horizon) })
+      const data = await predictionService.prediksiSemuaBarang({ horizon: parseInt(horizon) })
       setHasil(data)
     } catch (e) { toast.error(e.message) } finally { setLoading(false) }
-  }, [activeProject?.id, horizon])
+  }, [horizon])
 
   useEffect(() => { load() }, [load])
 
@@ -44,12 +41,6 @@ export default function PrediksiStok() {
   const sorted = [...hasil].sort((a, b) => getStatus(a).order - getStatus(b).order)
 
   const chartData = detail ? buildChartData(detail) : []
-
-  if (!activeProject) return (
-    <div className="flex items-center justify-center py-24 text-gray-400">
-      <p className="text-sm font-medium">Pilih project terlebih dahulu</p>
-    </div>
-  )
 
   return (
     <div className="space-y-4">

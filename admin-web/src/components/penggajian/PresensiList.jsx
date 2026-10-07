@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import toast from 'react-hot-toast'
 import {
   Plus, Edit2, Trash2, RefreshCw, Download,
-  CheckCircle, XCircle, Clock, Users, ChevronLeft, ChevronRight, Building2
+  CheckCircle, XCircle, Clock, Users, ChevronLeft, ChevronRight, Building2, Calendar
 } from 'lucide-react'
 import { Card, Button, Modal, Input, Select, FormField, Table, PageHeader, ConfirmDialog, SearchBar, DropdownSelect } from '../common'
 import { FormSection, FieldRow, InfoBox } from '../common/FormSection'
@@ -43,7 +43,10 @@ export default function PresensiList() {
   const [filterProject,  setFilterProject]  = useState('')
   const [saving,         setSaving]         = useState(false)
   const [lastRefresh,    setLastRefresh]    = useState(null)
-  const autoMarkDone     = useRef(new Set())
+  const autoMarkRanOnce  = useRef(false)
+  const [weeklyModal,    setWeeklyModal]    = useState(false)
+  const [weeklyLoading,  setWeeklyLoading]  = useState(false)
+  const [weeklyForm,     setWeeklyForm]     = useState({ tanggal_mulai: today(), tanggal_selesai: today(), nama_pekerjaan: '' })
 
   const [form, setForm] = useState({
     project_id: '', karyawan_id: '', tanggal: today(),
@@ -66,7 +69,7 @@ export default function PresensiList() {
         jam_masuk, jam_keluar, durasi_jam,
         status_kehadiran, uang_makan, uang_transport, upah_luar_kota,
         catatan, metode_input,
-        karyawan:karyawan_id(id, nama_karyawan, nik, jabatan:jabatan_id(nama_jabatan)),
+        karyawan:karyawan_id(id, nama_karyawan, kode_karyawan, jabatan:jabatan_id(nama_jabatan)),
         project:project_id(nama_project, kode_project)
       `).eq('tanggal', filterTanggal).order('karyawan_id')
 
@@ -92,17 +95,17 @@ export default function PresensiList() {
     }
   }, [filterTanggal, filterProject])
 
+  useEffect(() => { load() }, [load])
+
+  // Sekali per kunjungan halaman: minta database menandai 'alfa' semua
+  // karyawan yang belum tercatat di hari-hari yang sudah lewat (semua
+  // tanggal sekaligus, bukan cuma tanggal yang sedang difilter).
   useEffect(() => {
-    const run = async () => {
-      const result = await load()
-      if (!result) return
-      const { presensiData, karyawanList } = result
-      if (isTanggalLewat(filterTanggal) && !autoMarkDone.current.has(filterTanggal)) {
-        autoMarkDone.current.add(filterTanggal)
-        autoMarkAlfa(presensiData, karyawanList)
-      }
-    }
-    run()
+    if (autoMarkRanOnce.current) return
+    autoMarkRanOnce.current = true
+    payrollService.autoMarkAlfa()
+      .then((jumlah) => { if (jumlah > 0) load(true) })
+      .catch((e) => console.warn('[autoMarkAlfa] gagal:', e.message))
   }, [load])
 
   // Polling + realtime hanya bekerja saat tab terlihat & halaman aktif
@@ -117,20 +120,6 @@ export default function PresensiList() {
     return () => { supabase.removeChannel(channel) }
   }, [requestLoad])
 
-
-  const autoMarkAlfa = async (prs, karList) => {
-    const ids = new Set(prs.map(d => d.karyawan_id))
-    const belum = karList.filter(k => !ids.has(k.id))
-    if (!belum.length) return
-    await Promise.allSettled(belum.map(k =>
-      payrollService.insertPresensiIfNotExists({
-        karyawan_id: k.id, tanggal: filterTanggal,
-        status_kehadiran: 'alfa', metode_input: 'otomatis',
-        catatan: 'Otomatis: tidak tercatat',
-      })
-    ))
-    load(true)
-  }
 
   // ─── Helpers ────────────────────────────────────────────────────────────
   const calcDurasi = (masuk, keluar) => {
@@ -275,6 +264,32 @@ export default function PresensiList() {
       .catch(e => toast.error('Gagal export: ' + e.message))
   }
 
+  // Laporan mingguan harian (meniru rekap absensi proyek manual, per paket pekerjaan)
+  const bukaLaporanMingguan = async (jenis) => {
+    if (!filterProject) return toast.error('Pilih project terlebih dahulu')
+    if (weeklyForm.tanggal_selesai < weeklyForm.tanggal_mulai) return toast.error('Tanggal selesai harus setelah tanggal mulai')
+    setWeeklyLoading(true)
+    try {
+      const projectId = parseInt(filterProject)
+      const namaProject = projects.find(p => String(p.id) === String(filterProject))?.nama_project || '-'
+      const filters = { project_id: projectId, tanggal_dari: weeklyForm.tanggal_mulai, tanggal_sampai: weeklyForm.tanggal_selesai }
+      const [presensiRows, lemburRows, kasbonRows] = await Promise.all([
+        payrollService.getPresensi(filters),
+        payrollService.getLembur(filters),
+        payrollService.getKasbon(filters),
+      ])
+      const payload = {
+        presensiRows, lemburRows, kasbonRows, namaProject,
+        namaPekerjaan: weeklyForm.nama_pekerjaan.trim(),
+        tanggalMulai: weeklyForm.tanggal_mulai, tanggalSelesai: weeklyForm.tanggal_selesai,
+      }
+      const aksi = jenis === 'excel' ? exportService.exportLaporanMingguanHarianExcel : exportService.exportLaporanMingguanHarianPDF
+      await aksi(payload)
+      toast.success(jenis === 'excel' ? 'Excel diunduh' : 'PDF diunduh')
+      setWeeklyModal(false)
+    } catch (e) { toast.error('Gagal export: ' + e.message) } finally { setWeeklyLoading(false) }
+  }
+
   const durasi = calcDurasi(form.jam_masuk, form.jam_keluar)
 
   return (
@@ -289,6 +304,9 @@ export default function PresensiList() {
             </Button>
             <Button variant="outline" size="sm" icon={Download} onClick={() => bukaLaporan('pdf')}>
               PDF
+            </Button>
+            <Button variant="outline" size="sm" icon={Calendar} onClick={() => setWeeklyModal(true)}>
+              Laporan Mingguan
             </Button>
             <Button icon={Plus} onClick={openAdd}>Input Presensi</Button>
           </div>
@@ -542,6 +560,40 @@ export default function PresensiList() {
       <ConfirmDialog open={!!deleting} title="Hapus Presensi"
         message={`Hapus presensi ${deleting?.karyawan?.nama_karyawan} tanggal ${formatTanggal(deleting?.tanggal)}?`}
         onConfirm={handleDelete} onCancel={() => setDeleting(null)} />
+
+      {/* ── Laporan Mingguan Harian (per paket pekerjaan) ── */}
+      <Modal open={weeklyModal} onClose={() => setWeeklyModal(false)} title="Laporan Mingguan Harian" size="sm">
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            Rekap presensi, lembur, dan kasbon harian (Minggu–Sabtu) untuk project yang sedang difilter.
+            Isi nama pekerjaan untuk menandai kelompok kerja ini (opsional).
+          </p>
+          {!filterProject && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700">
+              Pilih project pada filter di atas terlebih dahulu.
+            </div>
+          )}
+          <FormField label="Nama Pekerjaan" help="Contoh: Plapon, ME, Hidrant — opsional">
+            <Input value={weeklyForm.nama_pekerjaan}
+              onChange={e => setWeeklyForm(f => ({ ...f, nama_pekerjaan: e.target.value }))}
+              placeholder="Contoh: Pekerjaan Plapon" />
+          </FormField>
+          <FormField label="Tanggal Mulai" required>
+            <Input type="date" value={weeklyForm.tanggal_mulai}
+              onChange={e => setWeeklyForm(f => ({ ...f, tanggal_mulai: e.target.value }))} />
+          </FormField>
+          <FormField label="Tanggal Selesai" required>
+            <Input type="date" value={weeklyForm.tanggal_selesai}
+              onChange={e => setWeeklyForm(f => ({ ...f, tanggal_selesai: e.target.value }))} />
+          </FormField>
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1" icon={Download} loading={weeklyLoading}
+              onClick={() => bukaLaporanMingguan('excel')}>Excel</Button>
+            <Button className="flex-1" icon={Download} loading={weeklyLoading}
+              onClick={() => bukaLaporanMingguan('pdf')}>PDF</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

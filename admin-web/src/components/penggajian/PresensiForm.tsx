@@ -127,7 +127,9 @@ const PresensiForm: React.FC = () => {
       durasi_jam: durasi,
       upah_luar_kota: data.upah_luar_kota || 0,
     }
-    const { error: err } = await supabase.from('presensi').upsert(payload, { onConflict: 'project_id,karyawan_id,tanggal' })
+    // Constraint unik di presensi cuma (karyawan_id, tanggal) -- lihat
+    // FIX_PRESENSI_UNIQUE_CONSTRAINT.sql
+    const { error: err } = await supabase.from('presensi').upsert(payload, { onConflict: 'karyawan_id,tanggal' })
     if (err) { error('Gagal menyimpan presensi: ' + err.message); return }
     success('Presensi berhasil disimpan')
     setSavedCount(p => p + 1)

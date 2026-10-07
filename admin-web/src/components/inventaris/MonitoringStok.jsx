@@ -4,7 +4,6 @@ import toast from 'react-hot-toast'
 import { AlertTriangle, Package, TrendingUp, DollarSign, RefreshCw } from 'lucide-react'
 import { Card, Table, PageHeader, SearchBar, DropdownSelect } from '../common'
 import { inventoryService } from '../../services/inventoryService'
-import { useProject } from '../../context/ProjectContext'
 import { formatRupiah } from '../../utils/formatters'
 
 const AUTO_REFRESH_MS = 20000
@@ -17,7 +16,6 @@ const getStokStatus = (b) => {
 }
 
 export default function MonitoringStok() {
-  const { activeProject } = useProject()
   const [barang, setBarang] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -27,16 +25,15 @@ export default function MonitoringStok() {
   const countdownRef = useRef(null)
 
   const load = useCallback(async (silent = false) => {
-    if (!activeProject?.id) return
     if (!silent) setLoading(true)
     try {
-      const data = await inventoryService.getBarang(activeProject.id)
+      const data = await inventoryService.getBarang()
       setBarang(data)
       setLastUpdated(new Date())
       setCountdown(AUTO_REFRESH_MS / 1000)
     } catch (e) { if (!silent) toast.error(e.message) }
     finally { if (!silent) setLoading(false) }
-  }, [activeProject?.id])
+  }, [])
 
   useEffect(() => { load() }, [load])
 
@@ -78,17 +75,11 @@ export default function MonitoringStok() {
     setFilter(f => f === newFilter ? 'all' : newFilter)
   }
 
-  if (!activeProject) return (
-    <div className="flex items-center justify-center py-24 text-gray-400">
-      <p className="text-sm font-medium">Pilih project terlebih dahulu</p>
-    </div>
-  )
-
   return (
     <div className="space-y-4">
       <PageHeader
         title="Monitoring Stok"
-        subtitle={`${activeProject.nama_project} • Auto refresh ${AUTO_REFRESH_MS / 1000} detik`}
+        subtitle={`Gudang Pusat • Auto refresh ${AUTO_REFRESH_MS / 1000} detik`}
         action={
           <button
             onClick={() => load()}

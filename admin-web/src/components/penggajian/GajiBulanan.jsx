@@ -286,7 +286,7 @@ export default function GajiBulanan() {
                             </div>
                             <div className="min-w-0">
                               <p className="font-medium text-gray-800 truncate">{r.karyawan?.nama_karyawan}</p>
-                              <p className="text-xs text-gray-400 font-mono">{r.karyawan?.id_karyawan || '-'}</p>
+                              <p className="text-xs text-gray-400 font-mono">{r.karyawan?.kode_karyawan ?? '-'}</p>
                             </div>
                           </div>
                           {/* Hari */}

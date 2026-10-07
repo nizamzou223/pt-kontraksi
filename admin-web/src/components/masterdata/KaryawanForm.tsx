@@ -8,7 +8,6 @@ import { z } from 'zod'
 
 const karyawanSchema = z.object({
   nama_karyawan: z.string().min(2, 'Nama minimal 2 karakter').max(150),
-  nik: z.string().regex(/^\d{16}$/, 'NIK harus tepat 16 digit angka'),
   jabatan_id: z.number({ invalid_type_error: 'Pilih golongan' }).min(1, 'Pilih golongan'),
   departemen_id: z.number().optional().nullable(),
   gaji_harian_override: z.number({ invalid_type_error: 'Masukkan gaji harian' }).min(1, 'Gaji harian wajib diisi'),
@@ -45,7 +44,6 @@ const KaryawanForm: React.FC<KaryawanFormProps> = ({ editData, onClose, onSaved 
     if (editData) {
       reset({
         nama_karyawan:        editData.nama_karyawan as string,
-        nik:                  editData.nik as string,
         jabatan_id:           editData.jabatan_id as number,
         departemen_id:        (editData.departemen_id as number) ?? null,
         gaji_harian_override: (editData.gaji_harian_override as number) ?? 0,
@@ -58,7 +56,6 @@ const KaryawanForm: React.FC<KaryawanFormProps> = ({ editData, onClose, onSaved 
   const onSubmit = async (data: KaryawanFormData) => {
     const payload = {
       nama_karyawan:           data.nama_karyawan,
-      nik:                     data.nik,
       jabatan_id:              data.jabatan_id,
       departemen_id:           data.departemen_id || null,
       gaji_harian_override:    data.gaji_harian_override,
@@ -112,17 +109,6 @@ const KaryawanForm: React.FC<KaryawanFormProps> = ({ editData, onClose, onSaved 
                   className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   placeholder="Contoh: Budi Santoso" />
                 {errors.nama_karyawan && <p className="text-xs text-red-500">{errors.nama_karyawan.message}</p>}
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-sm font-semibold text-gray-700">
-                  NIK Karyawan <span className="text-red-500">*</span>
-                </label>
-                <input {...register('nik')} inputMode="numeric" maxLength={16}
-                  className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  placeholder="16 digit NIK, contoh: 3201012345678901" />
-                {errors.nik && <p className="text-xs text-red-500">{errors.nik.message}</p>}
-                <p className="text-xs text-gray-400">NIK harus 16 digit angka dan unik untuk setiap karyawan</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

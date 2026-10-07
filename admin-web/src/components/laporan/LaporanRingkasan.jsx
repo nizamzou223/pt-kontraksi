@@ -230,7 +230,7 @@ export default function LaporanRingkasan() {
                       style={{animationDelay:`${i*40}ms`}}>
                       <Package size={14} className="text-red-500 flex-shrink-0" />
                       <span className="text-sm font-semibold text-gray-700 flex-1 truncate">{b.nama_barang}</span>
-                      <span className="text-xs text-gray-400 flex-shrink-0">{b.project?.nama_project?.slice(0,12)}</span>
+                      <span className="text-xs text-gray-400 flex-shrink-0">{b.kode_barang}</span>
                       <div className="text-right flex-shrink-0">
                         <p className="text-sm font-extrabold text-red-600">{b.stok_saat_ini}</p>
                         <p className="text-[10px] text-gray-400">min:{b.stok_minimal}</p>

@@ -53,7 +53,7 @@ class ExportService {
   }) async {
     final ex = Excel.createExcel(); final sh = ex['Presensi']; ex.delete('Sheet1');
     _title(sh, 'LAPORAN PRESENSI — ${namaProject??"Semua Project"}', 12, sub: 'Tanggal: ${_d(tanggal)}  ·  Cetak: ${_now()}');
-    _hdr(sh, 2, ['No','Nama Karyawan','NIK','Jabatan','Status','Jam Masuk','Jam Keluar','Uang Makan','Uang Transport','Upah Luar Kota','Gaji Harian','Total Gaji'],
+    _hdr(sh, 2, ['No','Nama Karyawan','Kode Karyawan','Jabatan','Status','Jam Masuk','Jam Keluar','Uang Makan','Uang Transport','Upah Luar Kota','Gaji Harian','Total Gaji'],
         [4,24,14,18,13,10,10,15,15,16,16,18]);
 
     // Sort by golongan then nama
@@ -76,7 +76,7 @@ class ExportService {
       final totalRow = hadir ? _gajiPokokDariDurasi(durasiJam, gajiHarian) + uMakan + uTransport + uLuarKota : 0.0;
       totalGaji += totalRow;
       _row(sh, i+3, i, [
-        IntCellValue(i+1), TextCellValue(k['nama_karyawan']??'-'), TextCellValue(k['nik']??'-'),
+        IntCellValue(i+1), TextCellValue(k['nama_karyawan']??'-'), TextCellValue(k['kode_karyawan']?.toString()??'-'),
         TextCellValue(jab['nama_jabatan']??'-'), TextCellValue(hadir?'Hadir':'Tidak Hadir'),
         TextCellValue(p['jam_masuk']!=null?(p['jam_masuk'] as String).substring(0,5):'-'),
         TextCellValue(p['jam_keluar']!=null?(p['jam_keluar'] as String).substring(0,5):'-'),
@@ -101,13 +101,13 @@ class ExportService {
   }) async {
     final ex=Excel.createExcel(); final sh=ex['Lembur']; ex.delete('Sheet1');
     _title(sh, 'LAPORAN LEMBUR — $namaProject', 9, dari: dari, sampai: sampai);
-    _hdr(sh, 2, ['No','Nama','NIK','Tanggal','Jam Mulai','Jam Selesai','Durasi (j)','Total (Rp)','Status'],
+    _hdr(sh, 2, ['No','Nama','Kode Karyawan','Tanggal','Jam Mulai','Jam Selesai','Durasi (j)','Total (Rp)','Status'],
         [4,22,13,12,10,10,10,16,12]);
     for (var i=0; i<data.length; i++) {
       final l=data[i]; final k=(l['karyawan'] != null ? l['karyawan'] as Map : <String,dynamic>{});
       final s=(l['status_persetujuan'] as String?) ?? 'pending';
       _row(sh, i+3, i, [
-        IntCellValue(i+1), TextCellValue(k['nama_karyawan']??'-'), TextCellValue(k['nik']??'-'),
+        IntCellValue(i+1), TextCellValue(k['nama_karyawan']??'-'), TextCellValue(k['kode_karyawan']?.toString()??'-'),
         TextCellValue(_d(l['tanggal'] as String?)),
         TextCellValue((l['jam_mulai'] as String?)?.substring(0,5)??'-'),
         TextCellValue((l['jam_selesai'] as String?)?.substring(0,5)??'-'),
@@ -177,13 +177,13 @@ class ExportService {
   static Future<void> exportKasbonExcel({required List<Map<String,dynamic>> data}) async {
     final ex=Excel.createExcel(); final sh=ex['Kasbon']; ex.delete('Sheet1');
     _title(sh, 'LAPORAN KASBON — PT Krakatau Indah', 8, sub: 'Cetak: ${_now()}');
-    _hdr(sh, 2, ['No','Nama Karyawan','NIK','Project','Tanggal','Jumlah (Rp)','Sisa (Rp)','Status'],
+    _hdr(sh, 2, ['No','Nama Karyawan','Kode Karyawan','Project','Tanggal','Jumlah (Rp)','Sisa (Rp)','Status'],
         [4,22,13,18,12,16,16,12]);
     for (var i=0; i<data.length; i++) {
       final k = data[i]['karyawan'] != null ? data[i]['karyawan'] as Map : <String,dynamic>{}; final proj = data[i]['project'] != null ? data[i]['project'] as Map : <String,dynamic>{};
       final lunas=data[i]['status_lunas'] as bool? ?? false;
       _row(sh, i+3, i, [
-        IntCellValue(i+1), TextCellValue(k['nama_karyawan']??'-'), TextCellValue(k['nik']??'-'),
+        IntCellValue(i+1), TextCellValue(k['nama_karyawan']??'-'), TextCellValue(k['kode_karyawan']?.toString()??'-'),
         TextCellValue(proj['nama_project']??'-'), TextCellValue(_d(data[i]['tanggal_kasbon'] as String?)),
         DoubleCellValue((data[i]['jumlah_kasbon'] as num?)?.toDouble()??0),
         DoubleCellValue((data[i]['sisa_kasbon'] as num?)?.toDouble()??0),
@@ -256,6 +256,158 @@ class ExportService {
       },
     ));
     await _pOpen(pdf, 'Kasbon_${_fd()}.pdf');
+  }
+
+  // ════════════════════════════════════════════════════════
+  // LAPORAN MINGGUAN HARIAN per Pekerjaan (presensi + lembur + kasbon
+  // digabung, kolom harian Minggu–Sabtu). Pengelompokan "paket pekerjaan"
+  // diketik manual oleh mandor saat export (bukan field tersimpan di
+  // database), sama seperti versi admin-web — lihat exportService.js.
+  // ════════════════════════════════════════════════════════
+  static const _hariId = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+  static const _bulanSingkat = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+
+  static List<Map<String,String>> _daftarTanggal(String dari, String sampai) {
+    final out = <Map<String,String>>[];
+    var d = DateTime.parse(dari);
+    final akhir = DateTime.parse(sampai);
+    while (!d.isAfter(akhir)) {
+      final iso = '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+      out.add({'iso': iso, 'hari': _hariId[d.weekday % 7], 'label': '${d.day.toString().padLeft(2,'0')}-${_bulanSingkat[d.month-1]}'});
+      d = d.add(const Duration(days: 1));
+    }
+    return out;
+  }
+
+  // Jml Total = (hari hadir x upah harian) + total lembur (Rp) - total kasbon periode ini.
+  static List<Map<String,dynamic>> _rekapMingguanHarian({
+    required List<Map<String,dynamic>> presensiRows,
+    required List<Map<String,dynamic>> lemburRows,
+    required List<Map<String,dynamic>> kasbonRows,
+    required List<Map<String,String>> tanggalList,
+  }) {
+    final byKaryawan = <int, Map<String,dynamic>>{};
+    Map<String,dynamic> baris(int id, Map<String,dynamic> r) {
+      return byKaryawan.putIfAbsent(id, () {
+        final k = r['karyawan'] != null ? r['karyawan'] as Map : <String,dynamic>{};
+        final jab = k['jabatan'] != null ? k['jabatan'] as Map : <String,dynamic>{};
+        return {
+          'nama': k['nama_karyawan'] ?? '-',
+          'golongan': jab['nama_jabatan'] ?? '-',
+          'upahHarian': _n(k['gaji_harian_override'] ?? jab['gaji_harian']).toDouble(),
+          'hadir': <String,bool>{},
+          'totalLembur': 0.0,
+          'totalKasbon': 0.0,
+        };
+      });
+    }
+
+    for (final r in presensiRows) {
+      final id = r['karyawan_id'] as int;
+      final row = baris(id, r);
+      if (r['status_kehadiran'] == 'hadir') (row['hadir'] as Map<String,bool>)[r['tanggal'] as String] = true;
+    }
+    for (final r in lemburRows) {
+      final id = r['karyawan_id'] as int;
+      final row = baris(id, r);
+      row['totalLembur'] = (row['totalLembur'] as double) + _n(r['total_lembur']).toDouble();
+    }
+    for (final r in kasbonRows) {
+      final id = r['karyawan_id'] as int;
+      final row = baris(id, r);
+      row['totalKasbon'] = (row['totalKasbon'] as double) + _n(r['jumlah_kasbon']).toDouble();
+    }
+
+    final list = byKaryawan.values.map((row) {
+      final hadir = row['hadir'] as Map<String,bool>;
+      final jmlHari = tanggalList.where((t) => hadir[t['iso']] == true).length;
+      final jumlahUpah = jmlHari * (row['upahHarian'] as double);
+      final jmlTotal = jumlahUpah + (row['totalLembur'] as double) - (row['totalKasbon'] as double);
+      return {...row, 'jmlHari': jmlHari, 'jumlahUpah': jumlahUpah, 'jmlTotal': jmlTotal};
+    }).toList()
+      ..sort((a,b) => (a['nama'] as String).compareTo(b['nama'] as String));
+    return list;
+  }
+
+  static Future<void> exportLaporanMingguanExcel({
+    required List<Map<String,dynamic>> presensiRows,
+    required List<Map<String,dynamic>> lemburRows,
+    required List<Map<String,dynamic>> kasbonRows,
+    required String namaProject, String? namaPekerjaan,
+    required String tanggalMulai, required String tanggalSelesai,
+  }) async {
+    final tanggalList = _daftarTanggal(tanggalMulai, tanggalSelesai);
+    final list = _rekapMingguanHarian(presensiRows: presensiRows, lemburRows: lemburRows, kasbonRows: kasbonRows, tanggalList: tanggalList);
+
+    final ex = Excel.createExcel(); final sh = ex['Laporan Mingguan']; ex.delete('Sheet1');
+    final judul = 'LAPORAN MINGGUAN — ${namaPekerjaan?.isNotEmpty == true ? namaPekerjaan : namaProject}';
+    final cols = 6 + tanggalList.length;
+    _title(sh, judul, cols, sub: 'Project: $namaProject  |  Periode: ${_d(tanggalMulai)} – ${_d(tanggalSelesai)}  ·  Cetak: ${_now()}');
+    final headers = ['No','Nama','Golongan', ...tanggalList.map((t)=>'${t['hari']}\n${t['label']}'), 'Hari','Upah Harian','Jumlah Upah','Lembur (Rp)','Kasbon','Jml Total'];
+    final widths = [4.0,20.0,14.0, ...tanggalList.map((_)=>9.0), 8.0,14.0,15.0,14.0,13.0,15.0];
+    _hdr(sh, 2, headers, widths);
+
+    double totJumlahUpah=0, totLembur=0, totKasbon=0, totJmlTotal=0; int totHari=0;
+    for (var i=0; i<list.length; i++) {
+      final r = list[i];
+      final hadir = r['hadir'] as Map<String,bool>;
+      totHari += r['jmlHari'] as int;
+      totJumlahUpah += r['jumlahUpah'] as double;
+      totLembur += r['totalLembur'] as double;
+      totKasbon += r['totalKasbon'] as double;
+      totJmlTotal += r['jmlTotal'] as double;
+      _row(sh, i+3, i, [
+        IntCellValue(i+1), TextCellValue(r['nama'] as String), TextCellValue(r['golongan'] as String),
+        ...tanggalList.map((t) => TextCellValue(hadir[t['iso']] == true ? 'Hadir' : '-')),
+        IntCellValue(r['jmlHari'] as int),
+        DoubleCellValue(r['upahHarian'] as double),
+        DoubleCellValue(r['jumlahUpah'] as double),
+        DoubleCellValue(r['totalLembur'] as double),
+        DoubleCellValue(r['totalKasbon'] as double),
+        DoubleCellValue(r['jmlTotal'] as double),
+      ]);
+    }
+    _sum(sh, list.length+3, cols,
+        'TOTAL (${list.length} karyawan)  |  Hari: $totHari  |  Upah: ${_f(totJumlahUpah)}  |  Lembur: ${_f(totLembur)}  |  Kasbon: ${_f(totKasbon)}  |  Jml Total: ${_f(totJmlTotal)}');
+    await _xOpen(ex, 'LaporanMingguan_${_fd()}.xlsx');
+  }
+
+  static Future<void> exportLaporanMingguanPDF({
+    required List<Map<String,dynamic>> presensiRows,
+    required List<Map<String,dynamic>> lemburRows,
+    required List<Map<String,dynamic>> kasbonRows,
+    required String namaProject, String? namaPekerjaan,
+    required String tanggalMulai, required String tanggalSelesai,
+  }) async {
+    final tanggalList = _daftarTanggal(tanggalMulai, tanggalSelesai);
+    final list = _rekapMingguanHarian(presensiRows: presensiRows, lemburRows: lemburRows, kasbonRows: kasbonRows, tanggalList: tanggalList);
+    final pdf = pw.Document();
+    final judul = namaPekerjaan?.isNotEmpty == true ? namaPekerjaan! : namaProject;
+
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4.landscape, margin: const pw.EdgeInsets.all(24),
+      header: (_) => _pdfHdr('LAPORAN MINGGUAN — $judul', namaProject, 'Periode: ${_d(tanggalMulai)} – ${_d(tanggalSelesai)}', _pBrand),
+      footer: (_) => _pdfFtr(),
+      build: (_) => [
+        pw.TableHelper.fromTextArray(
+          headers: ['No','Nama','Golongan', ...tanggalList.map((t)=>'${t['hari']}\n${t['label']}'),
+            'Hari','Upah Harian','Jumlah Upah','Lembur','Kasbon','Jml Total'],
+          data: list.asMap().entries.map((e) {
+            final i=e.key; final r=e.value; final hadir = r['hadir'] as Map<String,bool>;
+            return ['${i+1}', r['nama'], r['golongan'],
+              ...tanggalList.map((t) => hadir[t['iso']] == true ? 'H' : '-'),
+              '${r['jmlHari']}', _f(r['upahHarian']), _f(r['jumlahUpah']), _f(r['totalLembur']), _f(r['totalKasbon']), _f(r['jmlTotal'])];
+          }).toList(),
+          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 7),
+          headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF2563EB)),
+          cellStyle: const pw.TextStyle(fontSize: 7),
+          cellAlignments: {0: pw.Alignment.center},
+          oddRowDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFFEFF6FF)),
+          border: pw.TableBorder.all(color: const PdfColor.fromInt(0xFFBFDBFE), width: 0.5),
+        ),
+      ],
+    ));
+    await _pOpen(pdf, 'LaporanMingguan_${_fd()}.pdf');
   }
 
   // ════════════════════════════════════════════════════════
@@ -348,10 +500,10 @@ class ExportService {
           ('${data.length-hadir}','Tidak Hadir',PdfColors.red700)]),
         pw.SizedBox(height: 14),
         pw.TableHelper.fromTextArray(
-          headers: ['No','Nama Karyawan','NIK','Status','Jam Masuk','Jam Keluar','Metode'],
+          headers: ['No','Nama Karyawan','Kode Karyawan','Status','Jam Masuk','Jam Keluar','Metode'],
           data: data.asMap().entries.map((e) {
             final p=e.value; final k = p['karyawan'] != null ? p['karyawan'] as Map : <String,dynamic>{};
-            return ['${e.key+1}', k['nama_karyawan']??'-', k['nik']??'-',
+            return ['${e.key+1}', k['nama_karyawan']??'-', k['kode_karyawan']?.toString()??'-',
               p['status_kehadiran']=='hadir'?'Hadir':'Tidak Hadir',
               p['jam_masuk']!=null?(p['jam_masuk'] as String).substring(0,5):'-',
               p['jam_keluar']!=null?(p['jam_keluar'] as String).substring(0,5):'-',
@@ -479,7 +631,7 @@ class ExportService {
             pw.Text('$sub  ·  $period', style: const pw.TextStyle(
               color: PdfColor.fromInt(0xCCFFFFFF), fontSize: 8)),
           ])),
-          pw.Text('PT KALI PELUS RAYA', style: const pw.TextStyle(
+          pw.Text('PT Krakatau Indah', style: const pw.TextStyle(
             color: PdfColor.fromInt(0xCCFFFFFF), fontSize: 8)),
         ]),
       ),

@@ -161,6 +161,24 @@ export default function GajiMingguan() {
     } finally { setProses(false) }
   }
 
+  const [prosesSatu, setProsesSatu] = useState(null) // id yang sedang diproses
+  const [konfirmasiSatuTarget, setKonfirmasiSatuTarget] = useState(null) // row yang mau dikonfirmasi dulu
+  const bayarSatu = (row) => setKonfirmasiSatuTarget(row) // buka konfirmasi dulu, jangan langsung eksekusi
+  const konfirmasiBayarSatu = async () => {
+    const row = konfirmasiSatuTarget
+    if (!row) return
+    setProsesSatu(row.id)
+    try {
+      const results = await payrollService.bayarGajiByIds([row.id], metodeBayar)
+      toast.success(`✅ Gaji ${row.karyawan?.nama_karyawan || ''} dibayar: ${formatRupiah(results[0]?.gaji_bersih || row.gaji_bersih)}`)
+      setKonfirmasiSatuTarget(null)
+      setDetailModal(false)
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    } finally { setProsesSatu(null) }
+  }
+
   const openEdit = (row) => {
     setSelected(row)
     setEditForm({
@@ -401,6 +419,12 @@ export default function GajiMingguan() {
                   className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit Gaji">
                   <Edit2 size={14} />
                 </button>
+                {r.status === 'draft' && (
+                  <button onClick={() => bayarSatu(r)} disabled={prosesSatu === r.id}
+                    className="p-1.5 rounded hover:bg-green-50 text-green-600 disabled:opacity-40" title="Bayar Karyawan Ini">
+                    <CreditCard size={14} />
+                  </button>
+                )}
                 {r.status === 'dibayar' && (
                   <button onClick={() => { setSelected(r); setResetModal(true) }}
                     className="p-1.5 rounded hover:bg-orange-50 text-orange-500" title="Reset ke Draft">
@@ -476,6 +500,10 @@ export default function GajiMingguan() {
                 Cetak Slip
               </Button>
               <Button icon={Edit2} onClick={() => { setDetailModal(false); openEdit(selected) }}>Edit Gaji</Button>
+              {selected.status === 'draft' && (
+                <Button icon={CreditCard} loading={prosesSatu === selected.id}
+                  onClick={() => bayarSatu(selected)}>Bayar Karyawan Ini</Button>
+              )}
               {selected.status === 'dibayar' && (
                 <Button variant="outline" icon={RotateCcw}
                   onClick={() => { setDetailModal(false); setResetModal(true) }}
@@ -667,6 +695,31 @@ export default function GajiMingguan() {
             )}
           </div>
         </div>
+      </Modal>
+
+      {/* ─── Konfirmasi bayar SATU karyawan (bukan tombol sekali klik langsung) ─── */}
+      <Modal open={!!konfirmasiSatuTarget} onClose={() => setKonfirmasiSatuTarget(null)} title="Konfirmasi Pembayaran" size="sm">
+        {konfirmasiSatuTarget && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Bayar gaji untuk karyawan berikut? Aksi ini akan memotong kasbon outstanding (jika ada) dan tidak bisa dibatalkan langsung.
+            </p>
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-4 border border-blue-100 space-y-1">
+              <p className="font-bold text-gray-900">{konfirmasiSatuTarget.karyawan?.nama_karyawan}</p>
+              <p className="text-xs text-gray-500">
+                {formatTanggal(konfirmasiSatuTarget.periode_mulai)} – {formatTanggal(konfirmasiSatuTarget.periode_selesai)}
+              </p>
+              <p className="text-xl font-extrabold text-green-700 pt-1">{formatRupiah(konfirmasiSatuTarget.gaji_bersih)}</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setKonfirmasiSatuTarget(null)}>Batal</Button>
+              <Button variant="success" className="flex-1" icon={CreditCard}
+                onClick={konfirmasiBayarSatu} loading={prosesSatu === konfirmasiSatuTarget.id}>
+                Ya, Bayar
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )

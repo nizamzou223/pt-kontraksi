@@ -81,19 +81,22 @@ function trainAndForecast(series, { lag = DEFAULT_LAG, horizon = DEFAULT_HORIZON
 }
 
 export const predictionService = {
-  // Prediksi kebutuhan & proyeksi stok untuk SEMUA barang pada satu project.
+  // Prediksi kebutuhan & proyeksi stok untuk SEMUA barang (gudang pusat —
+  // satu stok bersama semua project, lihat FIX_GUDANG_PUSAT.sql). Histori
+  // pemakaian (stok_keluar) juga diambil company-wide karena semua project
+  // menarik dari pool yang sama.
   // Hanya 2 query DB total (bukan N+1) — training RF per barang dilakukan di memori.
-  async prediksiSemuaBarang(projectId, opts = {}) {
+  async prediksiSemuaBarang(opts = {}) {
     const { historyWeeks = DEFAULT_HISTORY_WEEKS, lag = DEFAULT_LAG, horizon = DEFAULT_HORIZON } = opts
     const since = new Date(Date.now() - historyWeeks * MS_PER_WEEK).toISOString()
 
     const [{ data: barangList, error: e1 }, { data: keluarRows, error: e2 }] = await Promise.all([
       supabase.from('barang')
         .select('id, nama_barang, kode_barang, stok_saat_ini, stok_minimal, satuan_barang(singkatan)')
-        .eq('project_id', projectId).order('nama_barang'),
+        .order('nama_barang'),
       supabase.from('stok_keluar')
         .select('barang_id, jumlah, created_at')
-        .eq('project_id', projectId).gte('created_at', since),
+        .gte('created_at', since),
     ])
     if (e1) throw new Error(e1.message)
     if (e2) throw new Error(e2.message)

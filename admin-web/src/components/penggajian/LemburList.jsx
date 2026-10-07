@@ -2,7 +2,7 @@ import { usePolling } from '../../utils/pageActivity'
 import { today } from '../../utils/autoFill'
 import { useState, useEffect, useCallback } from 'react'
 import toast from 'react-hot-toast'
-import { Plus, Edit2, Trash2, Check, X, Download, Clock, Building2, Timer, TrendingUp, RefreshCw } from 'lucide-react'
+import { Plus, Edit2, Trash2, Check, X, Download, Clock, Building2, Timer, TrendingUp, RefreshCw, CheckSquare } from 'lucide-react'
 import { Card, Button, Modal, Input, Select, FormField, Table, PageHeader, ConfirmDialog, SearchBar, DropdownSelect } from '../common'
 import { FormSection, FieldRow, InfoBox, CalcPreview } from '../common/FormSection'
 import { payrollService } from '../../services/payrollService'
@@ -31,6 +31,8 @@ export default function LemburList() {
   const [filterProject, setFilterProject] = useState('')
   const [search, setSearch]     = useState('')
   const [syncing, setSyncing]   = useState(false) // dipakai auto-sync on mount
+  const [selectedIds, setSelectedIds] = useState(new Set()) // checklist untuk setujui/tolak massal
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const [form, setForm] = useState({
     project_id: '',
@@ -59,6 +61,8 @@ export default function LemburList() {
   }, [filterStatus, filterProject])
 
   useEffect(() => { load() }, [load])
+  // Bersihkan checklist saat filter berubah agar tidak ada ID tersembunyi yang kepilih
+  useEffect(() => { setSelectedIds(new Set()) }, [filterStatus, filterProject, search])
   const requestLoad = usePolling(() => load(true), AUTO_REFRESH_MS)
   // Sync ketika presensi berubah (auto-lembur dibuat/dihapus dari presensi)
   useEffect(() => { const u = syncBus.on('presensi', () => requestLoad()); return u }, [requestLoad])
@@ -187,6 +191,45 @@ export default function LemburList() {
     catch (e) { toast.error(e.message) }
   }
 
+  // ── CHECKLIST SETUJUI/TOLAK MASSAL ──────────────────────────
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const toggleSelectAllPending = (pendingIds) => {
+    setSelectedIds(prev => {
+      const allSelected = pendingIds.length > 0 && pendingIds.every(id => prev.has(id))
+      return allSelected ? new Set() : new Set(pendingIds)
+    })
+  }
+  const handleBulkApprove = async () => {
+    const ids = Array.from(selectedIds)
+    if (!ids.length) return
+    setBulkBusy(true)
+    try {
+      await payrollService.approveLemburByIds(ids, user?.id)
+      syncBus.emitAll('lembur', 'gaji')
+      toast.success(`${ids.length} lembur disetujui`)
+      setSelectedIds(new Set())
+      load()
+    } catch (e) { toast.error(e.message) } finally { setBulkBusy(false) }
+  }
+  const handleBulkReject = async () => {
+    const ids = Array.from(selectedIds)
+    if (!ids.length) return
+    setBulkBusy(true)
+    try {
+      await payrollService.rejectLemburByIds(ids)
+      syncBus.emitAll('lembur', 'gaji')
+      toast.success(`${ids.length} lembur ditolak`)
+      setSelectedIds(new Set())
+      load()
+    } catch (e) { toast.error(e.message) } finally { setBulkBusy(false) }
+  }
+
   const handleSinkron = async () => {
     setSyncing(true)
     try {
@@ -204,6 +247,8 @@ export default function LemburList() {
   }
 
   const filtered = data.filter(d => (d.karyawan?.nama_karyawan || '').toLowerCase().includes(search.toLowerCase()))
+  const pendingIds = filtered.filter(d => d.status_persetujuan === 'pending').map(d => d.id)
+  const allPendingSelected = pendingIds.length > 0 && pendingIds.every(id => selectedIds.has(id))
   const isHariKerja = (r) => r.catatan?.includes('Sudah dalam Gaji')
   const disetujui = data.filter(d => d.status_persetujuan === 'disetujui')
   const totalDisetujui = disetujui.filter(d => !isHariKerja(d)).reduce((s, l) => s + parseFloat(l.total_lembur || 0), 0)
@@ -315,6 +360,16 @@ export default function LemburList() {
         </div>
       </Card>
 
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+          <CheckSquare size={16} className="text-blue-600 flex-shrink-0" />
+          <span className="text-sm font-medium text-blue-700 flex-1">{selectedIds.size} lembur dipilih</span>
+          <Button size="sm" icon={Check} loading={bulkBusy} onClick={handleBulkApprove}>Setujui Terpilih</Button>
+          <Button size="sm" variant="outline" icon={X} loading={bulkBusy} onClick={handleBulkReject}>Tolak Terpilih</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Batal</Button>
+        </div>
+      )}
+
       <Card>
         {loading && data.length > 0 && (
           <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-2">
@@ -323,6 +378,19 @@ export default function LemburList() {
           </div>
         )}
         <Table loading={loading && data.length === 0} data={filtered} columns={[
+          { header: (
+              <input type="checkbox" className="rounded border-gray-300 cursor-pointer"
+                checked={allPendingSelected}
+                disabled={pendingIds.length === 0}
+                onChange={() => toggleSelectAllPending(pendingIds)}
+                title="Pilih semua yang pending" />
+            ), className: 'w-10', render: r => (
+              r.status_persetujuan === 'pending'
+                ? <input type="checkbox" className="rounded border-gray-300 cursor-pointer"
+                    checked={selectedIds.has(r.id)}
+                    onChange={() => toggleSelect(r.id)} />
+                : null
+          )},
           { header: 'Karyawan', render: r => (
             <div>
               <p className="font-medium text-sm">{r.karyawan?.nama_karyawan}</p>

@@ -78,14 +78,12 @@ class _PresensiScreenState extends State<PresensiScreen>
       }
 
       // Tandai otomatis 'alfa' untuk hari-hari lalu yang belum diinput —
-      // berjalan begitu layar Presensi dibuka, tanpa bergantung pada admin-web.
+      // berjalan begitu layar Presensi dibuka, lewat RPC yang sama dipakai
+      // admin-web (satu sumber kebenaran, lihat MIGRATION_AUTO_ALFA.sql).
       if (!_alfaAutoMarked) {
-        final berhasil = await _svc.autoMarkAlfaLewat(
-          projectId: widget.project['id'] as int,
-          karyawanList: _semuaKaryawan,
-        );
-        _alfaAutoMarked = berhasil; // gagal → dicoba lagi saat layar ini dimuat ulang
-        if (berhasil && mounted) _load(silent: true);
+        _alfaAutoMarked = true;
+        final jumlah = await _svc.autoMarkAlfa();
+        if (jumlah > 0 && mounted) _load(silent: true);
       }
     } catch (e) {
       if (mounted) {
@@ -130,46 +128,27 @@ class _PresensiScreenState extends State<PresensiScreen>
 
   // ── ABSEN CEPAT DARI LIST BELUM TERCATAT ─────────────────
   Future<void> _absenCepat(Map<String, dynamic> karyawan) async {
-    final jabatan = karyawan['jabatan'] as Map<String, dynamic>? ?? {};
     final now = DateTime.now();
     final jamNow =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:00';
     try {
-      final existing = await _svc.getPresensiHariIni(
+      // Atomic (lihat FIX_SCAN_PRESENSI_ATOMIC.sql) -- cek + tulis dalam satu
+      // transaksi database, sama seperti scan QR, supaya tidak ada jeda yang
+      // bisa bentrok dengan presensi lain untuk karyawan+tanggal yang sama.
+      final hasil = await _svc.scanPresensiQr(
+        projectId: widget.project['id'] as int,
         karyawanId: karyawan['id'] as int,
         tanggal: _tanggal,
+        jam: jamNow,
+        metodeInput: 'manual',
       );
-      if (existing != null &&
-          existing['jam_masuk'] != null &&
-          existing['jam_keluar'] == null) {
-        await _svc.updatePresensi(existing['id'] as int, {
-          'jam_keluar': jamNow,
-          'status_kehadiran': 'hadir',
-          'durasi_jam': PayrollService.hitungDurasiJam(
-              existing['jam_masuk'] as String, jamNow),
-        });
-        if (mounted) {
-          showSuccess(context, '${karyawan['nama_karyawan']} — Jam Keluar ✓');
-        }
-      } else if (existing == null || existing['jam_masuk'] == null) {
-        await _svc.upsertPresensi({
-          'project_id': widget.project['id'],
-          'karyawan_id': karyawan['id'],
-          'tanggal': _tanggal,
-          'status_kehadiran': 'belum_lengkap',
-          'jam_masuk': jamNow,
-          'metode_input': 'manual',
-          'uang_makan': jabatan['uang_makan'] ?? 0,
-          'uang_transport': jabatan['uang_transport'] ?? 0,
-        });
-        if (mounted) {
-          showSuccess(context, '${karyawan['nama_karyawan']} — Jam Masuk ✓');
-        }
-      } else {
-        if (mounted) {
-          showSuccess(
-              context, '${karyawan['nama_karyawan']} — Presensi sudah lengkap');
-        }
+      if (mounted) {
+        final label = switch (hasil['hasil']) {
+          'masuk' => 'Jam Masuk ✓',
+          'keluar' => 'Jam Keluar ✓',
+          _ => 'Presensi sudah lengkap',
+        };
+        showSuccess(context, '${karyawan['nama_karyawan']} — $label');
       }
       _load(silent: true);
     } catch (e) {
@@ -268,6 +247,77 @@ class _PresensiScreenState extends State<PresensiScreen>
     } catch (e) {
       if (mounted) showError(context, 'Gagal export: \$e');
     }
+  }
+
+  // Laporan mingguan harian (meniru rekap absensi proyek manual, per paket pekerjaan)
+  Future<void> _openLaporanMingguan() async {
+    final projectId = widget.project['id'] as int;
+    final namaProject = widget.project['nama_project'] as String? ?? '-';
+    DateTime mulai = DateTime.now().subtract(const Duration(days: 6));
+    DateTime selesai = DateTime.now();
+    final namaPekerjaanCtrl = TextEditingController();
+    String fmt(DateTime d) => '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
+        Future<void> pick(bool isMulai) async {
+          final picked = await showDatePicker(
+            context: ctx, initialDate: isMulai ? mulai : selesai,
+            firstDate: DateTime(2020), lastDate: DateTime.now(),
+          );
+          if (picked != null) {
+            setD(() { if (isMulai) { mulai = picked; } else { selesai = picked; } });
+          }
+        }
+        Future<void> jalankan(bool excel) async {
+          if (selesai.isBefore(mulai)) { showError(context, 'Tanggal selesai harus setelah tanggal mulai'); return; }
+          Navigator.pop(ctx);
+          try {
+            final dari = fmt(mulai), sampai = fmt(selesai);
+            final presensiRows = await _svc.getPresensi(projectId: projectId, tanggalDari: dari, tanggalSampai: sampai);
+            final lemburRows = await _svc.getLembur(projectId: projectId, tanggalDari: dari, tanggalSampai: sampai);
+            final kasbonRows = await _svc.getKasbon(projectId: projectId, tanggalDari: dari, tanggalSampai: sampai);
+            if (excel) {
+              await ExportService.exportLaporanMingguanExcel(
+                presensiRows: presensiRows, lemburRows: lemburRows, kasbonRows: kasbonRows,
+                namaProject: namaProject, namaPekerjaan: namaPekerjaanCtrl.text.trim(),
+                tanggalMulai: fmt(mulai), tanggalSelesai: fmt(selesai));
+            } else {
+              await ExportService.exportLaporanMingguanPDF(
+                presensiRows: presensiRows, lemburRows: lemburRows, kasbonRows: kasbonRows,
+                namaProject: namaProject, namaPekerjaan: namaPekerjaanCtrl.text.trim(),
+                tanggalMulai: fmt(mulai), tanggalSelesai: fmt(selesai));
+            }
+            if (mounted) showSuccess(context, excel ? 'File Excel berhasil dibuat & dibuka ✓' : 'File PDF berhasil dibuat & dibuka ✓');
+          } catch (e) {
+            if (mounted) showError(context, 'Gagal export: $e');
+          }
+        }
+        return AlertDialog(
+          title: const Text('Laporan Mingguan Harian'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Project: $namaProject', style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              TextField(controller: namaPekerjaanCtrl, decoration: const InputDecoration(
+                labelText: 'Nama Pekerjaan (opsional)', hintText: 'Contoh: Plapon, ME, Hidrant')),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(child: OutlinedButton(onPressed: () => pick(true), child: Text('Mulai: ${fmt(mulai)}'))),
+                const SizedBox(width: 8),
+                Expanded(child: OutlinedButton(onPressed: () => pick(false), child: Text('Selesai: ${fmt(selesai)}'))),
+              ]),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            OutlinedButton(onPressed: () => jalankan(true), child: const Text('Excel')),
+            FilledButton(onPressed: () => jalankan(false), child: const Text('PDF')),
+          ],
+        );
+      }),
+    );
   }
 
   Future<void> _exportPDF() async {
@@ -499,6 +549,15 @@ class _PresensiScreenState extends State<PresensiScreen>
             child: const Icon(Icons.picture_as_pdf_rounded, size: 20),
           ),
           const SizedBox(height: 8),
+          FloatingActionButton.small(
+            heroTag: 'laporan_mingguan',
+            onPressed: _openLaporanMingguan,
+            backgroundColor: AppColors.brand600,
+            foregroundColor: Colors.white,
+            tooltip: 'Laporan Mingguan Harian',
+            child: const Icon(Icons.calendar_view_week_rounded, size: 20),
+          ),
+          const SizedBox(height: 8),
           // Input Manual
           FloatingActionButton.small(
             heroTag: 'manual',
@@ -676,7 +735,7 @@ class _PresensiScreenState extends State<PresensiScreen>
                                 fontWeight: FontWeight.w600,
                                 color: context.cText)),
                         Text(
-                            '${k['nik'] ?? k['id_karyawan'] ?? ''} · ${jab['nama_jabatan'] ?? '-'}',
+                            '${k['kode_karyawan'] ?? ''} · ${jab['nama_jabatan'] ?? '-'}',
                             style:
                                 TextStyle(fontSize: 15, color: context.cSub)),
                       ])),
@@ -779,7 +838,7 @@ class _PresensiCard extends StatelessWidget {
             StatusBadge(status: data['status_kehadiran'] ?? ''),
           ]),
           Text(
-              '${karyawan['nik'] ?? karyawan['id_karyawan'] ?? ''} · ${jabatan['nama_jabatan'] ?? '-'}',
+              '${karyawan['kode_karyawan'] ?? ''} · ${jabatan['nama_jabatan'] ?? '-'}',
               style: TextStyle(fontSize: 15, color: context.cSub)),
           const SizedBox(height: 4),
           Wrap(
@@ -1761,7 +1820,8 @@ class _QRScannerScreenState extends State<_QRScannerScreen> {
   bool _processing = false;
   String? _lastResult;
   String? _lastMessage;
-  bool _lastSuccess = true;
+  // 'masuk' = hijau, 'keluar' = merah, 'info' = sudah lengkap, 'error' = gagal
+  String _lastType = 'info';
 
   @override
   void dispose() {
@@ -1786,58 +1846,49 @@ class _QRScannerScreenState extends State<_QRScannerScreen> {
           .validateQRCode(qrValue, projectId: widget.project['id'] as int?);
       if (karyawan == null) throw Exception('Data tidak ditemukan.');
 
-      final jabatan = karyawan['jabatan'] as Map<String, dynamic>? ?? {};
       final now = DateTime.now();
       final jamSekarang =
           "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:00";
       final karyawanId = karyawan['id'] as int;
 
-      // Cek apakah sudah ada presensi hari ini (jam masuk sudah ada?)
-      final existing = await widget.payrollService.getPresensiHariIni(
-        karyawanId: karyawanId,
+      // Cek + tulis presensi dalam satu transaksi atomic di database (lihat
+      // FIX_SCAN_PRESENSI_ATOMIC.sql) -- tidak ada lagi jeda antara "cek
+      // sudah ada atau belum" dan "tulis" yang sebelumnya bisa bentrok kalau
+      // ada scan/proses lain yang menulis baris yang sama persis di jeda itu.
+      final hasil = await widget.payrollService.scanPresensiQr(
         projectId: widget.project['id'] as int,
+        karyawanId: karyawanId,
         tanggal: widget.tanggal,
+        jam: jamSekarang,
+        metodeInput: 'qr_code',
+        qrValue: qrValue,
       );
 
       String pesan;
-      if (existing == null || existing['jam_masuk'] == null) {
-        // SCAN PERTAMA = JAM MASUK
-        await widget.payrollService.upsertPresensi({
-          'project_id': widget.project['id'],
-          'karyawan_id': karyawanId,
-          'tanggal': widget.tanggal,
-          'status_kehadiran': 'belum_lengkap',
-          'jam_masuk': jamSekarang,
-          'metode_input': 'qr_code',
-          'qr_code_scanned_masuk': qrValue,
-          'uang_makan': jabatan['uang_makan'] ?? 0,
-          'uang_transport': jabatan['uang_transport'] ?? 0,
-        });
-        pesan = "✓ JAM MASUK\n${karyawan['nama_karyawan']}\n$jamSekarang";
-      } else if (existing['jam_keluar'] == null) {
-        // SCAN KEDUA = JAM KELUAR → status jadi HADIR
-        await widget.payrollService.updatePresensi(existing['id'] as int, {
-          'jam_keluar': jamSekarang,
-          'status_kehadiran': 'hadir',
-          'durasi_jam': PayrollService.hitungDurasiJam(
-              existing['jam_masuk'] as String, jamSekarang),
-          'qr_code_scanned_keluar': qrValue,
-        });
-        pesan = "✓ JAM KELUAR\n${karyawan['nama_karyawan']}\n$jamSekarang";
-      } else {
-        // Sudah lengkap
-        pesan = "ℹ️ ${karyawan['nama_karyawan']}\nPresensi sudah lengkap";
+      String tipe;
+      switch (hasil['hasil']) {
+        case 'masuk':
+          pesan = "✓ JAM MASUK\n${karyawan['nama_karyawan']}\n$jamSekarang";
+          tipe = 'masuk';
+          break;
+        case 'keluar':
+          pesan = "✓ JAM KELUAR\n${karyawan['nama_karyawan']}\n$jamSekarang";
+          tipe = 'keluar';
+          break;
+        default:
+          pesan = "ℹ️ ${karyawan['nama_karyawan']}\nPresensi sudah lengkap";
+          tipe = 'info';
       }
 
       widget.onScanned();
       setState(() {
         _lastMessage = pesan;
-        _lastSuccess = true;
+        _lastType = tipe;
       });
     } catch (e) {
       setState(() {
         _lastMessage = e.toString().replaceFirst('Exception: ', '');
-        _lastSuccess = false;
+        _lastType = 'error';
       });
     } finally {
       await Future.delayed(const Duration(seconds: 3));
@@ -1847,6 +1898,20 @@ class _QRScannerScreenState extends State<_QRScannerScreen> {
           _lastMessage = null;
         });
       }
+    }
+  }
+
+  // Hijau untuk jam masuk, merah untuk jam keluar — biru untuk info, merah untuk error
+  Color _warnaHasil(String tipe) {
+    switch (tipe) {
+      case 'masuk':
+        return const Color(0xFF16A34A);
+      case 'keluar':
+        return const Color(0xFFDC2626);
+      case 'error':
+        return const Color(0xFFDC2626);
+      default:
+        return const Color(0xFF2563EB);
     }
   }
 
@@ -1888,7 +1953,9 @@ class _QRScannerScreenState extends State<_QRScannerScreen> {
           height: 260,
           decoration: BoxDecoration(
             border: Border.all(
-                color: _processing ? Colors.green : AppColors.brand400,
+                color: _lastMessage != null
+                    ? _warnaHasil(_lastType)
+                    : AppColors.brand400,
                 width: 3),
             borderRadius: BorderRadius.circular(16),
           ),
@@ -1905,9 +1972,7 @@ class _QRScannerScreenState extends State<_QRScannerScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   decoration: BoxDecoration(
-                    color: _lastSuccess
-                        ? const Color(0xFF16A34A)
-                        : const Color(0xFFDC2626),
+                    color: _warnaHasil(_lastType),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Text(_lastMessage!,

@@ -8,6 +8,7 @@ import { FormSection, FieldRow } from '../common/FormSection'
 import { escapeHtml } from '../../utils/security'
 import { formatTanggal, formatRupiah, getStatusColor, formatNamaStatus } from '../../utils/formatters'
 import { STATUS_PROJECT } from '../../utils/constants'
+import { useSelection } from '../../utils/useSelection'
 
 // ======================== PROJECT LIST ========================
 export function ProjectList() {
@@ -21,6 +22,9 @@ export function ProjectList() {
   const [deleting, setDeleting] = useState(null)
   const [search, setSearch] = useState('')
   const [form, setForm] = useState({ kode_project: '', nama_project: '', deskripsi: '', lokasi: '', project_manager_id: '', budget_total: '', tanggal_mulai: '', tanggal_selesai: '', status_project: 'aktif' })
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const { selected: selectedIds, toggle: toggleSelect, toggleAll: toggleSelectAll, clear: clearSelection } = useSelection()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -52,6 +56,21 @@ export function ProjectList() {
     catch (e) { toast.error(e.message) }
   }
 
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true)
+    let berhasil = 0, dilewati = 0
+    for (const id of selectedIds) {
+      try { await projectService.deleteProject(id); berhasil++ }
+      catch { dilewati++ }
+    }
+    setBulkDeleting(false)
+    setBulkConfirm(false)
+    clearSelection()
+    load()
+    if (dilewati > 0) toast.error(`${berhasil} project dihapus, ${dilewati} gagal dihapus`)
+    else toast.success(`${berhasil} project berhasil dihapus`)
+  }
+
   const filtered = data.filter(d => d.nama_project.toLowerCase().includes(search.toLowerCase()) || d.kode_project.includes(search))
 
   return (
@@ -68,7 +87,25 @@ export function ProjectList() {
 
       <Card>
         <div className="mb-4"><SearchBar value={search} onChange={setSearch} placeholder="Cari project..." /></div>
+        {selectedIds.size > 0 && (
+          <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-3">
+            <p className="text-sm text-blue-700 font-medium">{selectedIds.size} project dipilih</p>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={clearSelection}>Batal</Button>
+              <Button variant="danger" size="sm" icon={Trash2} onClick={() => setBulkConfirm(true)}>Hapus Terpilih</Button>
+            </div>
+          </div>
+        )}
         <Table loading={loading} data={filtered} columns={[
+          { header: (
+              <input type="checkbox" className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+                checked={filtered.length > 0 && filtered.every(r => selectedIds.has(r.id))}
+                onChange={() => toggleSelectAll(filtered.map(r => r.id))} />
+            ), className: 'w-10', render: r => (
+              <input type="checkbox" className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+                checked={selectedIds.has(r.id)}
+                onChange={() => toggleSelect(r.id)} />
+            )},
           { header: 'Kode', render: r => <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{r.kode_project}</span> },
           { header: 'Nama Project', render: r => <div><p className="font-medium text-gray-900">{r.nama_project}</p><p className="text-xs text-gray-400">{r.lokasi}</p></div> },
           { header: 'Project Manager', render: r => r.karyawan?.nama_karyawan || <span className="text-gray-400">-</span> },
@@ -149,6 +186,9 @@ export function ProjectList() {
       {/* Assign Karyawan Modal */}
       {selectedProject && <AssignKaryawanModal open={assignModal} onClose={() => setAssignModal(false)} project={selectedProject} karyawan={karyawan} />}
       <ConfirmDialog open={!!deleting} title="Hapus Project" message={`Hapus project "${deleting?.nama_project}"?`} onConfirm={handleDelete} onCancel={() => setDeleting(null)} />
+      <ConfirmDialog open={bulkConfirm} title="Hapus Project Terpilih"
+        message={`Hapus ${selectedIds.size} project terpilih beserta seluruh data presensi, lembur, dan kasbon di dalamnya? Tindakan ini tidak dapat dibatalkan.`}
+        loading={bulkDeleting} onConfirm={handleBulkDelete} onCancel={() => setBulkConfirm(false)} />
     </div>
   )
 }
@@ -193,7 +233,7 @@ function AssignKaryawanModal({ open, onClose, project, karyawan }) {
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${assigned.includes(k.id) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'}`}>{k.nama_karyawan?.[0]}</div>
               <div className="flex-1">
                 <p className="text-sm font-medium text-gray-900">{k.nama_karyawan}</p>
-                <p className="text-xs text-gray-400">{k.jabatan?.nama_jabatan} · {k.nik || k.id_karyawan}</p>
+                <p className="text-xs text-gray-400">{k.jabatan?.nama_jabatan} · {k.kode_karyawan}</p>
               </div>
               <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${assigned.includes(k.id) ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`}>
                 {assigned.includes(k.id) && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="2" strokeLinecap="round" /></svg>}
@@ -250,7 +290,7 @@ export function QRCodeGenerator() {
     try {
       const QRCode = await import('qrcode')
       // Nilai deterministik — tanpa timestamp agar permanen
-      const qrValue = `KPELUS-${selected.id_karyawan || selected.nik}-${selected.id}`
+      const qrValue = `KRAKATAU-${selected.kode_karyawan}-${selected.id}`
       const url = await QRCode.default.toDataURL(qrValue, { width: 300, margin: 2, color: { dark: '#1e293b', light: '#ffffff' } })
       // insert bukan upsert — tolak jika sudah ada
       const saved = await projectService.insertQRCode({ karyawan_id: selected.id, qr_code_value: qrValue, status_aktif: true })
@@ -266,7 +306,7 @@ export function QRCodeGenerator() {
       const QRCode = await import('qrcode')
       const url = await QRCode.default.toDataURL(qrData.qr_code_value, { width: 400, margin: 2 })
       const link = document.createElement('a')
-      link.download = `QR-${selected.nik}-${selected.nama_karyawan}.png`
+      link.download = `QR-${selected.kode_karyawan}-${selected.nama_karyawan}.png`
       link.href = url; link.click()
       toast.success('QR Code diunduh')
     } catch (e) { toast.error(e.message) }
@@ -330,7 +370,7 @@ export function QRCodeGenerator() {
         ${selected.departemen?.nama_departemen ? `<div class="emp-dept">${escapeHtml(selected.departemen.nama_departemen)}</div>` : ''}
       </div>
       <div class="badges">
-        <div class="badge">NIK: ${escapeHtml(selected.nik || selected.id_karyawan)}</div>
+        <div class="badge">Kode: ${escapeHtml(String(selected.kode_karyawan))}</div>
       </div>
     </div>
     <div class="right">
@@ -348,7 +388,7 @@ export function QRCodeGenerator() {
   }
 
   const filtered = karyawan.filter(k =>
-    k.nama_karyawan.toLowerCase().includes(search.toLowerCase()) || k.nik.includes(search)
+    k.nama_karyawan.toLowerCase().includes(search.toLowerCase()) || String(k.kode_karyawan ?? '').includes(search)
   )
 
   return (
@@ -367,7 +407,7 @@ export function QRCodeGenerator() {
                     <div className="w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center text-sm font-bold text-slate-700 flex-shrink-0">{k.nama_karyawan?.[0]}</div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm text-gray-900">{k.nama_karyawan}</p>
-                      <p className="text-xs text-gray-400">{k.nik || k.id_karyawan} · {k.jabatan?.nama_jabatan}</p>
+                      <p className="text-xs text-gray-400">{k.kode_karyawan} · {k.jabatan?.nama_jabatan}</p>
                     </div>
                     <div className={`w-2 h-2 rounded-full ${selected?.id === k.id ? 'bg-blue-500' : 'bg-gray-200'}`} />
                   </div>
@@ -389,7 +429,7 @@ export function QRCodeGenerator() {
               <div className="space-y-4">
                 <div className="text-center">
                   <p className="font-semibold text-gray-900">{selected.nama_karyawan}</p>
-                  <p className="text-xs text-gray-400">{selected.nik || selected.id_karyawan} · {selected.jabatan?.nama_jabatan}</p>
+                  <p className="text-xs text-gray-400">{selected.kode_karyawan} · {selected.jabatan?.nama_jabatan}</p>
                 </div>
 
                 {qrData && qrDataUrl ? (
@@ -422,7 +462,7 @@ export function QRCodeGenerator() {
                         </div>
                         <div style={{ display:'flex', gap:3 }}>
                           <div style={{ background:'rgba(255,255,255,.18)', border:'1px solid rgba(255,255,255,.28)', borderRadius:2, padding:'1px 4px', fontSize:'5px', fontWeight:600 }}>
-                            NIK: {selected.nik || selected.id_karyawan}
+                            Kode: {selected.kode_karyawan}
                           </div>
                         </div>
                       </div>

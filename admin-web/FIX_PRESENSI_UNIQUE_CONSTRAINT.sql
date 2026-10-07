@@ -1,0 +1,42 @@
+-- ============================================================================
+-- CATATAN: constraint unik yang SEBENARNYA ada di tabel presensi
+-- ============================================================================
+-- Ditemukan lewat pengujian langsung (bukan dugaan) bahwa constraint unik di
+-- tabel `presensi` adalah:
+--
+--   presensi_karyawan_id_tanggal_key = UNIQUE (karyawan_id, tanggal)
+--
+-- BUKAN UNIQUE(project_id, karyawan_id, tanggal) seperti yang didokumentasikan
+-- di admin-web/migration.sql dan diasumsikan oleh hampir semua kode yang
+-- meng-upsert presensi. Artinya: satu karyawan hanya boleh punya SATU baris
+-- presensi per hari, TIDAK PEDULI di project mana dia tercatat -- ini sudah
+-- benar untuk model "karyawan bebas kerja di project mana saja" yang dipakai
+-- mandor_app (lihat home_screen.dart, mandor bebas memilih project aktif
+-- mana pun). project_id di baris presensi cuma atribut biasa yang mencatat
+-- DI PROJECT MANA karyawan itu bekerja hari itu, bukan bagian dari kunci unik.
+--
+-- Akibat dari ketidaksesuaian dokumentasi ini: setiap kode yang memanggil
+-- upsert dengan onConflict/ON CONFLICT menyertakan project_id akan SELALU
+-- gagal dengan error Postgres 42P10 ("no unique or exclusion constraint
+-- matching the ON CONFLICT specification") setiap kali ada baris yang
+-- sebenarnya konflik -- pesan error itu mengandung kata "unique", yang oleh
+-- fungsi penerjemah error di aplikasi (_err()/parseError()) disalahartikan
+-- jadi "Data sudah ada." Ini SELALU terjadi (bukan race condition sesekali)
+-- setiap kali karyawan yang sama sudah punya presensi hari itu dan dicoba
+-- di-upsert lagi.
+--
+-- Kode yang sudah diperbaiki untuk memakai onConflict/ON CONFLICT yang benar
+-- (karyawan_id, tanggal):
+--   - admin-web/src/services/payrollService.js (upsertPresensi)
+--   - admin-web/src/components/penggajian/PresensiForm.tsx
+--   - mandor_app/lib/services/payroll_service.dart (upsertPresensi)
+--   - FIX_SCAN_PRESENSI_ATOMIC.sql (scan_presensi_qr)
+--
+-- Tidak ada ALTER TABLE yang perlu dijalankan di file ini -- constraint-nya
+-- sendiri sudah benar di database, yang salah cuma asumsi di kode & dokumen.
+-- File ini murni catatan referensi.
+--
+-- Verifikasi constraint yang sebenarnya:
+SELECT conname, pg_get_constraintdef(oid) AS definisi
+  FROM pg_constraint
+ WHERE conrelid = 'public.presensi'::regclass AND contype IN ('u','p');

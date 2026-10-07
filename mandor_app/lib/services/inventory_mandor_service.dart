@@ -14,31 +14,14 @@ class InventoryMandorService {
     return msg.isNotEmpty ? msg : 'Terjadi kesalahan.';
   }
 
-  // Ambil barang yang tersedia di proyek (dan gudang pusat)
-  Future<List<Map<String, dynamic>>> getBarangTersedia(int projectId) async {
-    try {
-      final data = await _client
-          .from('barang')
-          .select(
-              '*, kategori_barang(nama_kategori), satuan_barang(nama_satuan, singkatan), project(nama_project)')
-          .eq('project_id', projectId)
-          .gt('stok_saat_ini', 0)
-          .order('nama_barang');
-
-      return List<Map<String, dynamic>>.from(data);
-    } catch (e) {
-      throw Exception(_parseError(e));
-    }
-  }
-
-  // Ambil semua barang di proyek (termasuk stok 0)
-  // Load SEMUA barang dari gudang (tanpa filter project)
-  Future<List<Map<String, dynamic>>> getAllBarang([int? projectId]) async {
+  // Ambil semua barang — katalog gudang pusat global, satu stok bersama semua
+  // project (lihat FIX_GUDANG_PUSAT.sql). Tidak difilter per project lagi.
+  Future<List<Map<String, dynamic>>> getAllBarang() async {
     try {
       final data = await _client
           .from('barang')
           .select('id, kode_barang, nama_barang, stok_saat_ini, stok_minimal, harga_beli, '
-              'project_id, kategori_barang:kategori_id(nama_kategori), '
+              'kategori_barang:kategori_id(nama_kategori), '
               'satuan_barang:satuan_id(nama_satuan, singkatan)')
           .order('nama_barang');
       return List<Map<String, dynamic>>.from(data);

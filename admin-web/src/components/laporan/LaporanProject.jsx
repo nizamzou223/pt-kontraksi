@@ -86,7 +86,7 @@ function KaryawanPerJabatan({ rows, title = 'Karyawan per Golongan', exportName 
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-800">{k.nama}</p>
-                  {k.id_karyawan && <p className="text-xs text-gray-400">{k.id_karyawan}</p>}
+                  {k.kode_karyawan && <p className="text-xs text-gray-400">{k.kode_karyawan}</p>}
                 </div>
                 {k.hari !== undefined && <span className="text-xs font-bold text-blue-700 flex-shrink-0">{k.hari} hari</span>}
                 {k.gaji_bersih !== undefined && <span className="text-sm font-bold text-green-700 flex-shrink-0">{formatRupiah(k.gaji_bersih)}</span>}
@@ -137,18 +137,18 @@ export default function LaporanProject() {
 
       const [proj, prs, lb, kb, sm, sk, pm, anggota] = await Promise.all([
         supabase.from('project').select('*, karyawan!project_manager_id(nama_karyawan, jabatan(nama_jabatan))').eq('id', pid).single().then(r => r.data),
-        supabase.from('presensi').select('karyawan_id, tanggal, status_kehadiran, durasi_jam, uang_makan, uang_transport, upah_luar_kota, karyawan(nama_karyawan, id_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal', periodeStart).lte('tanggal', periodeEnd).order('tanggal', { ascending: false }).then(r => r.data || []),
-        supabase.from('lembur').select('id, tanggal, durasi_jam, total_lembur, status_persetujuan, karyawan(nama_karyawan, id_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal', periodeStart).lte('tanggal', periodeEnd).order('tanggal', { ascending: false }).then(r => r.data || []),
-        supabase.from('kasbon').select('id, tanggal_kasbon, jumlah_kasbon, sisa_kasbon, status_lunas, catatan, karyawan(nama_karyawan, id_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal_kasbon', periodeStart).lte('tanggal_kasbon', periodeEnd).order('tanggal_kasbon', { ascending: false }).then(r => r.data || []),
+        supabase.from('presensi').select('karyawan_id, tanggal, status_kehadiran, durasi_jam, uang_makan, uang_transport, upah_luar_kota, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal', periodeStart).lte('tanggal', periodeEnd).order('tanggal', { ascending: false }).then(r => r.data || []),
+        supabase.from('lembur').select('id, tanggal, durasi_jam, total_lembur, status_persetujuan, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal', periodeStart).lte('tanggal', periodeEnd).order('tanggal', { ascending: false }).then(r => r.data || []),
+        supabase.from('kasbon').select('id, tanggal_kasbon, jumlah_kasbon, sisa_kasbon, status_lunas, catatan, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal_kasbon', periodeStart).lte('tanggal_kasbon', periodeEnd).order('tanggal_kasbon', { ascending: false }).then(r => r.data || []),
         supabase.from('stok_masuk').select('id, jumlah, catatan, created_at, barang(nama_barang, kode_barang, satuan_barang(singkatan))').eq('project_id', pid).gte('created_at', periodeStart).lte('created_at', dateEnd).order('created_at', { ascending: false }).then(r => r.data || []),
         supabase.from('stok_keluar').select('id, jumlah, tujuan, created_at, barang(nama_barang, kode_barang, satuan_barang(singkatan))').eq('project_id', pid).gte('created_at', periodeStart).lte('created_at', dateEnd).order('created_at', { ascending: false }).then(r => r.data || []),
-        supabase.from('permintaan_barang').select('id, jumlah_diminta, status_permintaan, catatan, created_at, barang(nama_barang, kode_barang, satuan_barang(singkatan)), karyawan!peminta_id(nama_karyawan, id_karyawan)').eq('project_id', pid).gte('created_at', periodeStart).lte('created_at', dateEnd).order('created_at', { ascending: false }).then(r => r.data || []),
-        supabase.from('project_karyawan').select('tanggal_mulai, status_assignment, catatan, karyawan(nama_karyawan, id_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).eq('status_assignment', 'aktif').then(r => r.data || []),
+        supabase.from('permintaan_barang').select('id, jumlah_diminta, status_permintaan, catatan, created_at, barang(nama_barang, kode_barang, satuan_barang(singkatan)), karyawan!peminta_id(nama_karyawan, kode_karyawan)').eq('project_id', pid).gte('created_at', periodeStart).lte('created_at', dateEnd).order('created_at', { ascending: false }).then(r => r.data || []),
+        supabase.from('project_karyawan').select('tanggal_mulai, status_assignment, catatan, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).eq('status_assignment', 'aktif').then(r => r.data || []),
       ])
 
       // Rekap gaji per project: ambil dari rekap_gaji_mingguan karyawan yg ada di project ini
       // Filter berdasarkan project_details JSONB
-      const karyawanIds = anggota.map(a => a.karyawan?.id_karyawan ? a.karyawan : null).filter(Boolean)
+      const karyawanIds = anggota.map(a => a.karyawan?.kode_karyawan ? a.karyawan : null).filter(Boolean)
       // Ambil ID dari project_karyawan
       const { data: pkData } = await supabase.from('project_karyawan')
         .select('karyawan_id').eq('project_id', pid)
@@ -156,7 +156,7 @@ export default function LaporanProject() {
 
       // Rekap gaji mingguan karyawan di project ini, di periode ini
       const { data: gajiRows } = await supabase.from('rekap_gaji_mingguan')
-        .select('*, karyawan(id_karyawan, nama_karyawan, nik, jabatan(nama_jabatan))')
+        .select('*, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))')
         .in('karyawan_id', pKids.length > 0 ? pKids : [0])
         .gte('periode_mulai', periodeStart).lte('periode_selesai', periodeEnd)
 
@@ -186,7 +186,7 @@ export default function LaporanProject() {
   const hadirPerKaryawan = {}
   hadirRows.forEach(p => {
     const id = p.karyawan_id
-    if (!hadirPerKaryawan[id]) hadirPerKaryawan[id] = { nama: p.karyawan?.nama_karyawan, id_karyawan: p.karyawan?.id_karyawan, jabatan: p.karyawan?.jabatan?.nama_jabatan, hari: 0 }
+    if (!hadirPerKaryawan[id]) hadirPerKaryawan[id] = { nama: p.karyawan?.nama_karyawan, kode_karyawan: p.karyawan?.kode_karyawan, jabatan: p.karyawan?.jabatan?.nama_jabatan, hari: 0 }
     hadirPerKaryawan[id].hari++
   })
   const kehadiranList = Object.values(hadirPerKaryawan).sort((a, b) => b.hari - a.hari)
@@ -197,7 +197,7 @@ export default function LaporanProject() {
     gajiMingguanData.forEach(g => {
       const kid = g.karyawan_id
       if (!byK[kid]) byK[kid] = {
-        nama: g.karyawan?.nama_karyawan, id_karyawan: g.karyawan?.id_karyawan,
+        nama: g.karyawan?.nama_karyawan, kode_karyawan: g.karyawan?.kode_karyawan,
         jabatan: g.karyawan?.jabatan?.nama_jabatan || 'Tanpa Golongan',
         gaji_bersih: 0, gaji_kotor: 0, hari: 0, lembur: 0, kasbon: 0, status: g.status,
       }
@@ -317,7 +317,7 @@ export default function LaporanProject() {
             <SectionTitle icon={Users} title="Kehadiran Karyawan — per Golongan" color="text-blue-700"
               action={kehadiranList.length > 0 && (
                 <Button variant="outline" size="sm" icon={Download} onClick={() =>
-                  exportCSV(kehadiranList.map(k => ({ 'ID Karyawan': k.id_karyawan || '-', Karyawan: k.nama || '-', Golongan: k.jabatan || '-', 'Hari Hadir': k.hari })), `kehadiran-${project.kode_project}.csv`)
+                  exportCSV(kehadiranList.map(k => ({ 'Kode Karyawan': k.kode_karyawan || '-', Karyawan: k.nama || '-', Golongan: k.jabatan || '-', 'Hari Hadir': k.hari })), `kehadiran-${project.kode_project}.csv`)
                 }>Export CSV</Button>
               )}
             />
@@ -339,7 +339,7 @@ export default function LaporanProject() {
                 action={
                   <Button variant="outline" size="sm" icon={Download} onClick={() =>
                     exportCSV(gajiPerKaryawanList.map(g => ({
-                      'ID Karyawan': g.id_karyawan || '-', Karyawan: g.nama || '-', Golongan: g.jabatan || '-',
+                      'Kode Karyawan': g.kode_karyawan || '-', Karyawan: g.nama || '-', Golongan: g.jabatan || '-',
                       'Hari Hadir': g.hari, 'Gaji Bersih': g.gaji_bersih, 'Gaji Kotor': g.gaji_kotor,
                       Lembur: g.lembur, 'Potongan Kasbon': g.kasbon, Status: g.status,
                     })), `gaji-${project.kode_project}.csv`)
@@ -355,7 +355,7 @@ export default function LaporanProject() {
             <SectionTitle icon={Clock} title="Lembur" color="text-teal-700"
               action={lemburData.length > 0 && (
                 <Button variant="outline" size="sm" icon={Download} onClick={() =>
-                  exportCSV(lemburData.map(l => ({ 'ID': l.karyawan?.id_karyawan || '-', Karyawan: l.karyawan?.nama_karyawan || '-', Golongan: l.karyawan?.jabatan?.nama_jabatan || '-', Tanggal: formatTanggal(l.tanggal), 'Durasi (jam)': parseFloat(l.durasi_jam || 0).toFixed(1), 'Total Lembur': l.total_lembur, Status: l.status_persetujuan })), `lembur-${project.kode_project}.csv`)
+                  exportCSV(lemburData.map(l => ({ 'Kode Karyawan': l.karyawan?.kode_karyawan || '-', Karyawan: l.karyawan?.nama_karyawan || '-', Golongan: l.karyawan?.jabatan?.nama_jabatan || '-', Tanggal: formatTanggal(l.tanggal), 'Durasi (jam)': parseFloat(l.durasi_jam || 0).toFixed(1), 'Total Lembur': l.total_lembur, Status: l.status_persetujuan })), `lembur-${project.kode_project}.csv`)
                 }>Export CSV</Button>
               )}
             />

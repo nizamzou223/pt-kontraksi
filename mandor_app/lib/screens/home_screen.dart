@@ -176,7 +176,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ...List.generate(
             5, (_) => _EmptyProjectPrompt(onTap: _showProjectPicker, loading: _loadingCatalog)),
         KaryawanScreen(key: ValueKey('kary_${_seeds[5]}'), user: widget.user),
-        ProfileScreen(key: ValueKey('prof_${_seeds[6]}'), user: widget.user),
+        ProfileScreen(key: ValueKey('prof_${_seeds[6]}'), user: widget.user, activeProject: _selectedProject),
       ];
     }
     final key = _selectedProject!['id'].toString();
@@ -203,7 +203,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           user: widget.user,
           project: _selectedProject!),
       KaryawanScreen(key: ValueKey('kary_${_seeds[5]}'), user: widget.user),
-      ProfileScreen(key: ValueKey('prof_${_seeds[6]}'), user: widget.user),
+      ProfileScreen(key: ValueKey('prof_${_seeds[6]}'), user: widget.user, activeProject: _selectedProject),
     ];
   }
 

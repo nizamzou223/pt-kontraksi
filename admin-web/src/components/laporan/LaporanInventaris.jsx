@@ -35,10 +35,13 @@ export default function LaporanInventaris() {
     setLoading(true)
     try {
       const pid = parseInt(selectedProject)
+      // Barang sekarang katalog global (gudang pusat, lihat FIX_GUDANG_PUSAT.sql)
+      // -- tidak lagi "milik" satu project. Laporan ini tetap per-project dengan
+      // membatasi tampilan ke barang yang benar-benar bergerak (stok masuk/keluar)
+      // di project & periode terpilih, bukan seluruh katalog perusahaan.
       const [brg, sm, sk, kritis] = await Promise.all([
         supabase.from('barang')
           .select('*, kategori_barang(nama_kategori), satuan_barang(nama_satuan, singkatan)')
-          .eq('project_id', pid)
           .order('nama_barang')
           .then(r => r.data || []),
         // Stok masuk di periode
@@ -55,9 +58,10 @@ export default function LaporanInventaris() {
           .gte('created_at', periodeStart)
           .lte('created_at', periodeEnd + 'T23:59:59')
           .then(r => r.data || []),
-        inventoryService.getStokKritis(pid),
+        inventoryService.getStokKritis(),
       ])
-      setBarang(brg)
+      const barangIdsBergerak = new Set([...sm, ...sk].map(r => r.barang_id))
+      setBarang(brg.filter(b => barangIdsBergerak.has(b.id)))
       setStokMasuk(sm)
       setStokKeluar(sk)
       setStokKritis(kritis)
@@ -169,7 +173,7 @@ export default function LaporanInventaris() {
               { label: 'Jenis Barang', val: barang.length, color: 'bg-blue-50 border-blue-100 text-blue-700', icon: Package },
               { label: 'Stok Masuk', val: `${totalItemMasuk} item`, color: 'bg-green-50 border-green-100 text-green-700', icon: ArrowDownRight, sub: formatRupiah(totalNilaiMasuk) },
               { label: 'Stok Keluar', val: `${totalItemKeluar} item`, color: 'bg-red-50 border-red-100 text-red-700', icon: ArrowUpRight },
-              { label: 'Stok Kritis', val: stokKritis.length, color: stokKritis.length > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-gray-50 border-gray-100 text-gray-500', icon: AlertTriangle },
+              { label: 'Stok Kritis (Gudang Pusat)', val: stokKritis.length, color: stokKritis.length > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-gray-50 border-gray-100 text-gray-500', icon: AlertTriangle },
             ].map((s, i) => (
               <div key={i} className={`rounded-2xl border p-4 flex items-center gap-3 transition-all hover:shadow-md ${s.color} animate-slideUp`}>
                 <div className="w-9 h-9 rounded-xl bg-white/70 flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -188,7 +192,7 @@ export default function LaporanInventaris() {
           {stokKritis.length > 0 && (
             <AlertInPage
               type="warning"
-              title={`${stokKritis.length} barang stok kritis`}
+              title={`${stokKritis.length} barang stok kritis (gudang pusat — seluruh project)`}
               message={stokKritis.slice(0,4).map(b => `${b.nama_barang} (${b.stok_saat_ini}/${b.stok_minimal})`).join(', ') + (stokKritis.length > 4 ? ` +${stokKritis.length-4} lainnya` : '')}
             />
           )}
@@ -225,7 +229,7 @@ export default function LaporanInventaris() {
             )}
 
             {/* Stok kritis detail */}
-            <Card title={`Stok Kritis (${stokKritis.length})`}>
+            <Card title={`Stok Kritis — Gudang Pusat (${stokKritis.length})`}>
               {stokKritis.length === 0 ? (
                 <div className="flex items-center justify-center py-10 text-gray-300 text-sm">Semua stok aman ✓</div>
               ) : (

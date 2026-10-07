@@ -85,10 +85,10 @@ async function anonSuite() {
   // harus cocok dengan signature dan bisa benar-benar dieksekusi. Fungsi itu SECURITY INVOKER,
   // jadi terlindungi oleh izin tabel yang sudah diuji di atas.
 
-  const e = await anon.rpc('email_for_nik', { p_nik: '0000000000000000' })
-  add('A. Anonim', 'RPC email_for_nik (NIK acak)',
+  const e = await anon.rpc('email_for_kode_karyawan', { p_kode: '999999999' })
+  add('A. Anonim', 'RPC email_for_kode_karyawan (kode acak)',
     e.error ? 'INFO' : (e.data === null ? 'PASS' : 'FAIL'),
-    e.error ? `tidak tersedia: ${e.error.message} (jalankan SECURITY_HARDENING.sql)` : 'NIK tak dikenal → null (tidak membocorkan data)')
+    e.error ? `tidak tersedia: ${e.error.message} (jalankan MIGRATION_KODE_KARYAWAN.sql)` : 'Kode tak dikenal → null (tidak membocorkan data)')
 
   // A5 signUp terbuka? (informasional — tidak membuat akun: email tidak valid ditolak lebih dulu)
   const s = await anon.auth.signUp({ email: 'bukan-email', password: 'x' })

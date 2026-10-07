@@ -40,7 +40,7 @@ flutter run
 
 ### Dependensi Utama
 - `supabase_flutter` — Koneksi Supabase + Auth
-- `mobile_scanner` — Scan QR Code karyawan (format: `KPELUS-{nik}-{id}-{timestamp}`)
+- `mobile_scanner` — Scan QR Code karyawan (format: `KRAKATAU-{kode_karyawan}-{id}`)
 - `google_fonts` — Plus Jakarta Sans (sesuai tema web)
 - `intl` — Format rupiah & tanggal Bahasa Indonesia
 
@@ -102,11 +102,11 @@ const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
 - `project_karyawan` — Penugasan mandor ke proyek
 - `karyawan` + `jabatan` — Data karyawan & gaji harian
 - `karyawan_qr_code` — Validasi scan QR
-- `presensi` — Upsert dengan key `(project_id, karyawan_id, tanggal)`
+- `presensi` — Upsert dengan key `(karyawan_id, tanggal)` (satu karyawan satu baris per hari, tidak peduli project)
 - `lembur` — Pengajuan lembur (status: pending)
 - `kasbon` — Pengajuan kasbon (potong gaji / manual)
 - `permintaan_barang` — Kirim permintaan ke gudang
-- `barang` — Lihat stok barang di proyek
+- `barang` — Katalog & stok gudang pusat (global, bukan per-project)
 
 ### Gudang App
 - `users`, `project` — Auth & navigasi proyek
@@ -141,7 +141,7 @@ Kedua aplikasi menggunakan komponen yang sesuai dengan Tailwind CSS dari admin-w
 - **Jumlah tidak negatif**: Validator di setiap input angka
 - **Stok validation**: Persetujuan permintaan dicek stok di server sebelum diproses
 - **Role verification**: Login ditolak jika role tidak sesuai aplikasi
-- **QR format validation**: Format `KPELUS-{nik}-{id}-{timestamp}` divalidasi sebelum proses presensi
+- **QR format validation**: Format `KRAKATAU-{kode_karyawan}-{id}` divalidasi sebelum proses presensi
 
 ---
 

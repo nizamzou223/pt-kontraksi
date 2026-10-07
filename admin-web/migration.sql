@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS jabatan (
 CREATE TABLE IF NOT EXISTS karyawan (
   id BIGSERIAL PRIMARY KEY,
   nama_karyawan VARCHAR(150) NOT NULL,
-  nik VARCHAR(16) UNIQUE NOT NULL CHECK (nik ~ '^[0-9]{16}$'),
+  kode_karyawan INTEGER UNIQUE,
   email VARCHAR(100) UNIQUE,
   no_hp VARCHAR(15),
   departemen_id BIGINT REFERENCES departemen(id) ON DELETE SET NULL,
@@ -106,9 +106,15 @@ CREATE TABLE IF NOT EXISTS project_karyawan (
 );
 
 -- 8. PRESENSI
+-- project_id nullable: presensi "alfa" otomatis (lihat MIGRATION_AUTO_ALFA.sql)
+-- tidak terikat project manapun. UNIQUE cuma (karyawan_id, tanggal) -- BUKAN
+-- menyertakan project_id -- satu karyawan satu baris presensi per hari, tidak
+-- peduli project mana yang dia kerjakan hari itu (karyawan bebas kerja di
+-- project mana saja). Lihat FIX_PRESENSI_UNIQUE_CONSTRAINT.sql untuk riwayat
+-- ketidaksesuaian dokumentasi ini dengan kode yang sempat ada.
 CREATE TABLE IF NOT EXISTS presensi (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGINT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  project_id BIGINT REFERENCES project(id) ON DELETE CASCADE,
   karyawan_id BIGINT NOT NULL REFERENCES karyawan(id) ON DELETE CASCADE,
   tanggal DATE NOT NULL,
   jam_masuk TIME,
@@ -124,7 +130,7 @@ CREATE TABLE IF NOT EXISTS presensi (
   catatan TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(project_id, karyawan_id, tanggal)
+  UNIQUE(karyawan_id, tanggal)
 );
 
 -- 9. LEMBUR
@@ -161,13 +167,14 @@ CREATE TABLE IF NOT EXISTS kasbon (
 );
 
 -- 11. KATEGORI BARANG
+-- Global (gudang pusat) sejak FIX_GUDANG_PUSAT.sql -- sebelumnya per-project
+-- (project_id NOT NULL, UNIQUE(project_id, nama_kategori)). Lihat
+-- FIX_GUDANG_PUSAT.sql untuk riwayat & alasan perubahan ini.
 CREATE TABLE IF NOT EXISTS kategori_barang (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGINT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-  nama_kategori VARCHAR(100) NOT NULL,
+  nama_kategori VARCHAR(100) NOT NULL UNIQUE,
   deskripsi TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(project_id, nama_kategori)
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 12. SATUAN BARANG
@@ -179,10 +186,16 @@ CREATE TABLE IF NOT EXISTS satuan_barang (
 );
 
 -- 13. BARANG
+-- Global (gudang pusat) sejak FIX_GUDANG_PUSAT.sql -- satu katalog + satu
+-- stok_saat_ini dipakai bersama semua project (sebelumnya per-project,
+-- project_id NOT NULL, UNIQUE(project_id, kode_barang)). Permintaan Barang
+-- mengurangi stok ini, Retur Barang menambahnya -- lihat MIGRATION_INVENTORY_FIX.sql
+-- + FIX_GUDANG_PUSAT.sql untuk RPC-nya. Tabel transaksi (stok_masuk,
+-- stok_keluar, permintaan_barang, retur_barang) TETAP punya project_id --
+-- itu mencatat di project mana transaksinya terjadi.
 CREATE TABLE IF NOT EXISTS barang (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGINT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-  kode_barang VARCHAR(50) NOT NULL,
+  kode_barang VARCHAR(50) NOT NULL UNIQUE,
   nama_barang VARCHAR(150) NOT NULL,
   kategori_id BIGINT NOT NULL REFERENCES kategori_barang(id) ON DELETE RESTRICT,
   satuan_id BIGINT NOT NULL REFERENCES satuan_barang(id) ON DELETE RESTRICT,
@@ -192,8 +205,7 @@ CREATE TABLE IF NOT EXISTS barang (
   stok_minimal INT DEFAULT 10,
   deskripsi TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(project_id, kode_barang)
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 14. STOK MASUK
@@ -260,6 +272,11 @@ CREATE TABLE IF NOT EXISTS retur_barang (
 CREATE INDEX IF NOT EXISTS idx_retur_barang_project ON retur_barang(project_id);
 CREATE INDEX IF NOT EXISTS idx_retur_barang_status  ON retur_barang(status_retur);
 
+-- RPC inventaris lain (tambah_stok_masuk, kurangi_stok_keluar, approve_permintaan,
+-- approve_retur, hapus_stok_masuk) ada di MIGRATION_INVENTORY_FIX.sql /
+-- FIX_GUDANG_PUSAT.sql -- sudah project_id-agnostic terhadap barang (hanya
+-- mengupdate barang.stok_saat_ini by id), jadi tidak terdampak oleh barang
+-- menjadi tabel global.
 CREATE OR REPLACE FUNCTION tambah_stok_masuk_retur(
   p_project_id BIGINT,
   p_barang_id BIGINT,

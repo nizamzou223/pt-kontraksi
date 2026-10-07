@@ -111,9 +111,9 @@ class _KasbonScreenState extends State<KasbonScreen> {
         final nama =
             ((k['karyawan'] as Map?)?['nama_karyawan'] as String? ?? '')
                 .toLowerCase();
-        final nik =
-            ((k['karyawan'] as Map?)?['nik'] as String? ?? '').toLowerCase();
-        return nama.contains(q) || nik.contains(q);
+        final kode =
+            ((k['karyawan'] as Map?)?['kode_karyawan']?.toString() ?? '').toLowerCase();
+        return nama.contains(q) || kode.contains(q);
       }).toList();
     }
     return l;
@@ -216,7 +216,7 @@ class _KasbonScreenState extends State<KasbonScreen> {
             onChanged: (v) => setState(() => _searchQ = v),
             decoration: fDeco(
               context,
-              hint: context.s.searchEmpNIK,
+              hint: context.s.searchEmpCode,
               prefix:
                   Icon(Icons.search_rounded, size: 17, color: context.cMuted),
             ).copyWith(
@@ -471,7 +471,7 @@ class _KasbonCard extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                           color: context.cText)),
                   Text(
-                      '${k['nik'] ?? k['id_karyawan'] ?? ''} · ${proj['kode_project'] ?? proj['nama_project'] ?? '-'}',
+                      '${k['kode_karyawan'] ?? ''} · ${proj['kode_project'] ?? proj['nama_project'] ?? '-'}',
                       style: TextStyle(fontSize: 14, color: context.cSub)),
                 ])),
             StatusBadge(status: lunas ? 'lunas' : 'pending'),
@@ -723,7 +723,7 @@ class _KasbonFormSheetState extends State<_KasbonFormSheet> {
                                   value: k,
                                   label: k['nama_karyawan'] as String? ?? '-',
                                   subtitle:
-                                      '${k['nik'] ?? k['id_karyawan'] ?? ''} · ${(k['jabatan'] as Map?)?['nama_jabatan'] ?? '-'}',
+                                      '${k['kode_karyawan'] ?? ''} · ${(k['jabatan'] as Map?)?['nama_jabatan'] ?? '-'}',
                                 ))
                             .toList(),
                         onChanged: (v) => setState(() => _selKaryawan = v),

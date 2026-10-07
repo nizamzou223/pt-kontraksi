@@ -175,7 +175,7 @@ export const payrollService = {
   // ============================================================
   async getPresensi(filters = {}) {
     let q = supabase.from('presensi')
-      .select('*, karyawan(id_karyawan, nama_karyawan, nik, jabatan(nama_jabatan)), project(nama_project, kode_project)')
+      .select('*, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan)), project(nama_project, kode_project)')
       .order('tanggal', { ascending: false })
     if (filters.project_id) q = q.eq('project_id', filters.project_id)
     if (filters.karyawan_id) q = q.eq('karyawan_id', filters.karyawan_id)
@@ -189,6 +189,12 @@ export const payrollService = {
   },
 
   async upsertPresensi(payload) {
+    // Constraint unik yang SEBENARNYA di tabel presensi cuma (karyawan_id,
+    // tanggal) -- satu karyawan satu baris presensi per hari, tidak peduli
+    // project (lihat FIX_PRESENSI_UNIQUE_CONSTRAINT.sql). onConflict yang
+    // menyertakan project_id tidak cocok dengan constraint manapun dan bikin
+    // Postgres gagal dengan error "no unique or exclusion constraint
+    // matching" -- yang salah diterjemahkan jadi "Data sudah ada." di UI.
     const { data, error } = await supabase.from('presensi')
       .upsert(payload, { onConflict: 'karyawan_id,tanggal' })
       .select('*, karyawan(nama_karyawan, gaji_harian_override, jabatan(gaji_harian)), project(nama_project)').single()
@@ -248,23 +254,11 @@ export const payrollService = {
     return data
   },
 
-  async insertPresensiIfNotExists(payload) {
-    const { data: existing } = await supabase
-      .from('presensi')
-      .select('id, status_kehadiran')
-      .eq('karyawan_id', payload.karyawan_id)
-      .eq('tanggal', payload.tanggal)
-      .maybeSingle()
-    if (existing) return existing
-    const { data, error } = await supabase
-      .from('presensi')
-      .insert(payload)
-      .select('id, status_kehadiran')
-      .single()
-    if (error) {
-      if (error.code === '23505') return null
-      throw new Error(parseError(error))
-    }
+  // Tandai 'alfa' semua karyawan yang belum punya presensi di hari yang
+  // sudah lewat (lihat MIGRATION_AUTO_ALFA.sql). Aman dipanggil berkali-kali.
+  async autoMarkAlfa() {
+    const { data, error } = await supabase.rpc('auto_mark_alfa')
+    if (error) throw new Error(parseError(error))
     return data
   },
 
@@ -367,7 +361,7 @@ export const payrollService = {
 
   async getLembur(filters = {}) {
     let q = supabase.from('lembur')
-      .select('*, karyawan(id_karyawan, nama_karyawan, nik, jabatan(nama_jabatan)), project(nama_project, kode_project)')
+      .select('*, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan)), project(nama_project, kode_project)')
       .order('tanggal', { ascending: false })
     if (filters.project_id) q = q.eq('project_id', filters.project_id)
     if (filters.karyawan_id) q = q.eq('karyawan_id', filters.karyawan_id)
@@ -414,16 +408,38 @@ export const payrollService = {
     return data
   },
 
+  // Setujui/tolak banyak lembur sekaligus (checklist di LemburList) — satu
+  // request, bukan loop per-id, sama seperti bayarGajiByIds.
+  async approveLemburByIds(ids, userId) {
+    if (!ids?.length) throw new Error('Tidak ada lembur yang dipilih')
+    const { data, error } = await supabase.from('lembur')
+      .update({ status_persetujuan: 'disetujui', disetujui_oleh: userId, updated_at: new Date().toISOString() })
+      .in('id', ids).eq('status_persetujuan', 'pending').select()
+    if (error) throw new Error(parseError(error))
+    return data
+  },
+
+  async rejectLemburByIds(ids) {
+    if (!ids?.length) throw new Error('Tidak ada lembur yang dipilih')
+    const { data, error } = await supabase.from('lembur')
+      .update({ status_persetujuan: 'ditolak', updated_at: new Date().toISOString() })
+      .in('id', ids).eq('status_persetujuan', 'pending').select()
+    if (error) throw new Error(parseError(error))
+    return data
+  },
+
   // ============================================================
   // KASBON
   // ============================================================
   async getKasbon(filters = {}) {
     let q = supabase.from('kasbon')
-      .select('*, karyawan(id_karyawan, nama_karyawan, nik, no_rekening, nama_bank), project(nama_project)')
+      .select('*, karyawan(nama_karyawan, kode_karyawan, no_rekening, nama_bank), project(nama_project)')
       .order('tanggal_kasbon', { ascending: false })
     if (filters.project_id) q = q.eq('project_id', filters.project_id)
     if (filters.karyawan_id) q = q.eq('karyawan_id', filters.karyawan_id)
     if (filters.status_lunas !== undefined) q = q.eq('status_lunas', filters.status_lunas)
+    if (filters.tanggal_dari) q = q.gte('tanggal_kasbon', filters.tanggal_dari)
+    if (filters.tanggal_sampai) q = q.lte('tanggal_kasbon', filters.tanggal_sampai)
     const { data, error } = await q
     if (error) throw new Error(parseError(error))
     return data
@@ -696,7 +712,7 @@ export const payrollService = {
 
   async getGajiMingguan(filters = {}) {
     let q = supabase.from('rekap_gaji_mingguan')
-      .select('*, karyawan(id_karyawan, nama_karyawan, nik, jabatan(nama_jabatan), no_rekening, nama_bank)')
+      .select('*, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan), no_rekening, nama_bank)')
       .not('status', 'eq', 'tidak_hadir')
       .order('total_hari_hadir', { ascending: false })
     if (filters.karyawan_id) q = q.eq('karyawan_id', filters.karyawan_id)
@@ -722,12 +738,14 @@ export const payrollService = {
       .eq('status', 'draft')
     if (!rekapList?.length) throw new Error('Tidak ada gaji draft untuk dibayar.')
     const tglBayar = new Date().toISOString().split('T')[0]
+    // Status semua rekap di-update dalam SATU request (bukan satu per karyawan) —
+    // potong kasbon tetap per-karyawan karena urutan FIFO-nya memang unik per orang.
+    await supabase.from('rekap_gaji_mingguan').update({
+      status: 'dibayar', metode_pembayaran: metodePembayaran,
+      tanggal_pembayaran: tglBayar, updated_at: new Date().toISOString()
+    }).in('id', rekapList.map(r => r.id))
     const results = []
     for (const rekap of rekapList) {
-      await supabase.from('rekap_gaji_mingguan').update({
-        status: 'dibayar', metode_pembayaran: metodePembayaran,
-        tanggal_pembayaran: tglBayar, updated_at: new Date().toISOString()
-      }).eq('id', rekap.id)
       if (rekap.total_potongan_kasbon > 0) {
         await this._potongKasbonKaryawan(rekap.karyawan_id, rekap.total_potongan_kasbon)
       }
@@ -746,19 +764,20 @@ export const payrollService = {
     if (error) throw new Error(parseError(error))
     if (!rekapList?.length) throw new Error('Gaji tidak ditemukan atau sudah dibayar sebelumnya.')
     const tglBayar = new Date().toISOString().split('T')[0]
+    // Status semua rekap di-update dalam SATU request (bukan satu per karyawan) —
+    // sebelumnya loop per-id bikin "Bayar Semua" lemot untuk banyak karyawan sekaligus.
+    const { error: updateErr } = await supabase.from('rekap_gaji_mingguan').update({
+      status: 'dibayar', metode_pembayaran: metodePembayaran,
+      tanggal_pembayaran: tglBayar, updated_at: new Date().toISOString()
+    }).in('id', rekapList.map(r => r.id))
+    if (updateErr) throw new Error(parseError(updateErr))
     const results = []
     for (const rekap of rekapList) {
-      const { error: updateErr } = await supabase.from('rekap_gaji_mingguan').update({
-        status: 'dibayar', metode_pembayaran: metodePembayaran,
-        tanggal_pembayaran: tglBayar, updated_at: new Date().toISOString()
-      }).eq('id', rekap.id)
-      if (updateErr) { console.error('Gagal update gaji ID', rekap.id, updateErr); continue }
       if (parseFloat(rekap.total_potongan_kasbon || 0) > 0) {
         await this._potongKasbonKaryawan(rekap.karyawan_id, rekap.total_potongan_kasbon)
       }
       results.push(rekap)
     }
-    if (results.length === 0) throw new Error('Semua pembayaran gagal. Coba lagi.')
     const bulan = parseInt(tglBayar.split('-')[1])
     const tahun = parseInt(tglBayar.split('-')[0])
     await payrollService._autoRekapBulanan(bulan, tahun)
@@ -849,25 +868,28 @@ export const payrollService = {
       if (g.status !== 'dibayar') byK[g.karyawan_id].allDibayar = false
     })
 
-    for (const [kid, d] of Object.entries(byK)) {
-      const { error: upsertErr } = await supabase.from('rekap_gaji_bulanan').upsert({
-        karyawan_id:          parseInt(kid),
-        bulan,
-        tahun,
-        total_gaji_bersih:    Math.round(d.gb),
-        total_gaji_kotor:     Math.round(d.gk),
-        total_gaji_pokok:     Math.round(d.pokok),
-        total_uang_makan:     Math.round(d.makan),
-        total_uang_transport: Math.round(d.transport),
-        total_hari_hadir:     d.hari,
-        total_uang_lembur:    Math.round(d.lembur),
-        total_kasbon_potong:  Math.round(d.kasbon),
-        status:               d.allDibayar ? 'final' : 'draft',
-        updated_at:           new Date().toISOString(),
-      }, { onConflict: 'karyawan_id,bulan,tahun' })
-      if (upsertErr) console.warn('rekap_gaji_bulanan upsert:', upsertErr.message)
-    }
-    return Object.keys(byK).length
+    // Satu upsert berisi semua baris sekaligus — sebelumnya di-loop satu per
+    // satu (satu request per karyawan), jadi lemot untuk bulan dengan banyak
+    // karyawan (mis. 199 orang = 199 round-trip) walau yang dibayar cuma 1 orang.
+    const rows = Object.entries(byK).map(([kid, d]) => ({
+      karyawan_id:          parseInt(kid),
+      bulan,
+      tahun,
+      total_gaji_bersih:    Math.round(d.gb),
+      total_gaji_kotor:     Math.round(d.gk),
+      total_gaji_pokok:     Math.round(d.pokok),
+      total_uang_makan:     Math.round(d.makan),
+      total_uang_transport: Math.round(d.transport),
+      total_hari_hadir:     d.hari,
+      total_uang_lembur:    Math.round(d.lembur),
+      total_kasbon_potong:  Math.round(d.kasbon),
+      status:               d.allDibayar ? 'final' : 'draft',
+      updated_at:           new Date().toISOString(),
+    }))
+    const { error: upsertErr } = await supabase.from('rekap_gaji_bulanan')
+      .upsert(rows, { onConflict: 'karyawan_id,bulan,tahun' })
+    if (upsertErr) console.warn('rekap_gaji_bulanan upsert:', upsertErr.message)
+    return rows.length
   },
 
   // Helper: rekap mingguan dalam satu bulan (by periode_selesai), termasuk draft
@@ -888,7 +910,7 @@ export const payrollService = {
   async getGajiBulananByKaryawanIds(karyawanIds, bulan, tahun) {
     if (!karyawanIds || karyawanIds.length === 0) return []
     const { data, error } = await supabase.from('rekap_gaji_bulanan')
-      .select('*, karyawan(id_karyawan, nama_karyawan, nik, jabatan(nama_jabatan), no_rekening, nama_bank)')
+      .select('*, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan), no_rekening, nama_bank)')
       .in('karyawan_id', karyawanIds)
       .eq('bulan', bulan).eq('tahun', tahun)
       .order('karyawan(nama_karyawan)')
@@ -898,7 +920,7 @@ export const payrollService = {
 
   async getGajiBulanan(filters = {}) {
     let q = supabase.from('rekap_gaji_bulanan')
-      .select('*, karyawan(id_karyawan, nama_karyawan, nik, jabatan(nama_jabatan), no_rekening, nama_bank)')
+      .select('*, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan), no_rekening, nama_bank)')
       .order('tahun', { ascending: false }).order('bulan', { ascending: false })
     if (filters.karyawan_id) q = q.eq('karyawan_id', filters.karyawan_id)
     if (filters.bulan) q = q.eq('bulan', filters.bulan)
@@ -923,7 +945,7 @@ export const payrollService = {
 
   async getPembayaranOtomatis(filters = {}) {
     let q = supabase.from('rekap_gaji_mingguan')
-      .select('*, karyawan(nama_karyawan, nik, no_rekening, nama_bank)')
+      .select('*, karyawan(nama_karyawan, kode_karyawan, no_rekening, nama_bank)')
       .eq('status', 'dibayar')
       .order('tanggal_pembayaran', { ascending: false })
     if (filters.karyawan_id) q = q.eq('karyawan_id', filters.karyawan_id)
@@ -986,7 +1008,7 @@ export const payrollService = {
   async getLaporanPerProject(projectId, periodeStart, periodeEnd) {
     const [presensiRes, lemburRes, kasbonRes] = await Promise.all([
       supabase.from('presensi')
-        .select('*, karyawan(nama_karyawan, nik, jabatan(nama_jabatan, gaji_harian), gaji_harian_override, uang_makan_override, uang_transport_override)')
+        .select('*, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan, gaji_harian), gaji_harian_override, uang_makan_override, uang_transport_override)')
         .eq('project_id', projectId)
         .gte('tanggal', periodeStart).lte('tanggal', periodeEnd)
         .eq('status_kehadiran', 'hadir'),

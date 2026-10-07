@@ -61,15 +61,15 @@ class _PermintaanScreenState extends State<PermintaanScreen>
     }
   }
 
-  // Stok kritis project ini — sama seperti alert "Stok Kritis" di dashboard admin-web
+  // Stok kritis gudang pusat (global, bukan per-project) — sama seperti
+  // MonitoringStok.jsx di admin-web (lihat FIX_GUDANG_PUSAT.sql)
   Future<void> _loadStokKritis() async {
     try {
       final barang = await _invSvc.getAllBarang();
-      final pid = widget.project['id'];
       final kritis = barang.where((b) {
         final min = (b['stok_minimal'] as num?) ?? 0;
         final stok = (b['stok_saat_ini'] as num?) ?? 0;
-        return b['project_id'] == pid && min > 0 && stok <= min;
+        return min > 0 && stok <= min;
       }).toList();
       if (mounted) setState(() => _stokKritis = kritis);
     } catch (_) {

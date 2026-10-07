@@ -8,9 +8,8 @@ import { exportService } from '../../services/exportService'
 import { escapeHtml } from '../../utils/security'
 import { isJabatanMandor } from '../../utils/akunMobile'
 import { formatTanggal, formatRupiah } from '../../utils/formatters'
-import { today, generateIDKaryawan } from '../../utils/autoFill'
-
-const NIK_REGEX = /^\d{16}$/
+import { today } from '../../utils/autoFill'
+import { useSelection } from '../../utils/useSelection'
 
 // ── QR Code generator menggunakan qrcode.react via CDN ────────
 // Pakai canvas API sederhana via URL API
@@ -43,8 +42,11 @@ export default function KaryawanList() {
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterJabatan, setFilterJabatan] = useState('all')
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const { selected: selectedIds, toggle: toggleSelect, toggleAll: toggleSelectAll, clear: clearSelection } = useSelection()
   const [form, setForm] = useState({
-    id_karyawan: '', nama_karyawan: '', nik: '',
+    nama_karyawan: '',
     departemen_id: '', jabatan_id: '',
     tanggal_bergabung: today(), status_aktif: true,
     gaji_harian_override: '', uang_makan_override: '', uang_transport_override: '',
@@ -69,7 +71,7 @@ export default function KaryawanList() {
   // ── Auto-generate QR saat karyawan dibuat ─────────────────
   // QR hanya dibuat SEKALI saat karyawan baru - tidak bisa di-generate ulang
   const generateQRForKaryawan = async (karyawanId) => {
-    const qrValue = 'KPELUS-' + String(karyawanId).padStart(6, '0')
+    const qrValue = 'KRAKATAU-' + String(karyawanId).padStart(6, '0')
     try {
       // Cek apakah sudah ada - jika sudah ada, TIDAK overwrite
       const { data: existing } = await supabase
@@ -165,7 +167,7 @@ export default function KaryawanList() {
                   <div class="emp-pos">${escapeHtml(karyawan.jabatan?.nama_jabatan || '-')}</div>
                   ${karyawan.departemen?.nama_departemen ? `<div class="emp-dept">${escapeHtml(karyawan.departemen.nama_departemen)}</div>` : ''}
                 </div>
-                <div><div class="badge">NIK: ${escapeHtml(karyawan.nik || karyawan.id_karyawan)}</div></div>
+                <div><div class="badge">Kode: ${escapeHtml(String(karyawan.kode_karyawan))}</div></div>
               </div>
               <div class="right">
                 <div class="qr-box"><img src="${qrSrc}" alt="QR"/></div>
@@ -185,9 +187,7 @@ export default function KaryawanList() {
   const openAdd = () => {
     setEditing(null)
     setForm({
-      id_karyawan: generateIDKaryawan(data),
       nama_karyawan: '',
-      nik: '',
       departemen_id: '', jabatan_id: '',
       tanggal_bergabung: today(), status_aktif: true,
       gaji_harian_override: '', uang_makan_override: '', uang_transport_override: '',
@@ -198,9 +198,7 @@ export default function KaryawanList() {
   const openEdit = (d) => {
     setEditing(d)
     setForm({
-      id_karyawan: d.id_karyawan || '-',
       nama_karyawan: d.nama_karyawan,
-      nik: d.nik || '',
       departemen_id: d.departemen_id || '',
       jabatan_id: d.jabatan_id,
       tanggal_bergabung: d.tanggal_bergabung,
@@ -214,15 +212,12 @@ export default function KaryawanList() {
 
   const handleSave = async () => {
     if (!form.nama_karyawan.trim()) return toast.error('Nama karyawan wajib diisi')
-    if (!form.nik.trim()) return toast.error('NIK karyawan wajib diisi')
-    if (!NIK_REGEX.test(form.nik.trim())) return toast.error('NIK harus tepat 16 digit angka')
     if (!form.jabatan_id) return toast.error('Jabatan wajib dipilih')
     if (!form.tanggal_bergabung) return toast.error('Tanggal bergabung wajib diisi')
 
     try {
       const payload = {
         nama_karyawan: form.nama_karyawan,
-        nik: form.nik.trim(),
         departemen_id: form.departemen_id ? parseInt(form.departemen_id) : null,
         jabatan_id: parseInt(form.jabatan_id),
         tanggal_bergabung: form.tanggal_bergabung,
@@ -270,13 +265,32 @@ export default function KaryawanList() {
     } catch (e) { toast.error(e.message); setDeleting(null) }
   }
 
-  const getIDKaryawan = (r) => r.id_karyawan || '-'
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true)
+    let berhasil = 0, dilewati = 0
+    for (const id of selectedIds) {
+      try {
+        const { data: kasbonAktif } = await supabase
+          .from('kasbon').select('id').eq('karyawan_id', id).eq('status_lunas', false)
+        if (kasbonAktif && kasbonAktif.length > 0) { dilewati++; continue }
+        await projectService.deleteKaryawan(id)
+        berhasil++
+      } catch { dilewati++ }
+    }
+    setBulkDeleting(false)
+    setBulkConfirm(false)
+    clearSelection()
+    load()
+    if (dilewati > 0) {
+      toast.error(`${berhasil} karyawan dihapus, ${dilewati} dilewati (masih ada kasbon belum lunas)`)
+    } else {
+      toast.success(`${berhasil} karyawan berhasil dihapus`)
+    }
+  }
 
   const filtered = data.filter(d => {
-    const id = getIDKaryawan(d)
     const matchSearch = d.nama_karyawan.toLowerCase().includes(search.toLowerCase()) ||
-      id.toLowerCase().includes(search.toLowerCase()) ||
-      (d.nik || '').toLowerCase().includes(search.toLowerCase())
+      String(d.kode_karyawan ?? '').includes(search)
     const matchStatus = filterStatus === 'all' ||
       (filterStatus === 'aktif' && d.status_aktif) ||
       (filterStatus === 'nonaktif' && !d.status_aktif)
@@ -294,7 +308,7 @@ export default function KaryawanList() {
             <Button variant="outline" icon={Download} size="sm"
               onClick={() => {
                 exportService.exportExcel(filtered, [
-                  { header: 'NIK', key: 'nik' },
+                  { header: 'Kode Karyawan', key: 'kode_karyawan' },
                   { header: 'Nama', key: 'nama_karyawan' },
                   { header: 'Golongan', render: r => r.jabatan?.nama_jabatan },
                   { header: 'Departemen', render: r => r.departemen?.nama_departemen || '-' },
@@ -334,7 +348,26 @@ export default function KaryawanList() {
           />
         </div>
 
+        {selectedIds.size > 0 && (
+          <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-3">
+            <p className="text-sm text-blue-700 font-medium">{selectedIds.size} karyawan dipilih</p>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={clearSelection}>Batal</Button>
+              <Button variant="danger" size="sm" icon={Trash2} onClick={() => setBulkConfirm(true)}>Hapus Terpilih</Button>
+            </div>
+          </div>
+        )}
+
         <Table loading={loading} data={filtered} columns={[
+          { header: (
+              <input type="checkbox" className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+                checked={filtered.length > 0 && filtered.every(r => selectedIds.has(r.id))}
+                onChange={() => toggleSelectAll(filtered.map(r => r.id))} />
+            ), className: 'w-10', render: r => (
+              <input type="checkbox" className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+                checked={selectedIds.has(r.id)}
+                onChange={() => toggleSelect(r.id)} />
+            )},
           { header: 'Karyawan', render: r => (
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-xs font-bold text-blue-600 flex-shrink-0">
@@ -342,7 +375,7 @@ export default function KaryawanList() {
               </div>
               <div>
                 <p className="font-medium text-gray-900">{r.nama_karyawan}</p>
-                <p className="text-xs text-gray-400 font-mono">{r.nik || getIDKaryawan(r)}</p>
+                <p className="text-xs text-gray-400 font-mono">Kode {r.kode_karyawan}</p>
               </div>
             </div>
           )},
@@ -387,7 +420,7 @@ export default function KaryawanList() {
               <div className="text-center">
                 <p className="font-bold text-gray-900 text-base">{qrKaryawan.nama_karyawan}</p>
                 <p className="text-sm text-gray-500">{qrKaryawan.jabatan?.nama_jabatan}</p>
-                <p className="text-xs text-gray-400">{getIDKaryawan(qrKaryawan)}</p>
+                <p className="text-xs text-gray-400">Kode {qrKaryawan.kode_karyawan}</p>
                 <div className="mt-2 bg-gray-100 px-3 py-1 rounded-lg">
                   <code className="text-xs font-mono text-blue-700">{qrKaryawan.qr_value}</code>
                 </div>
@@ -421,12 +454,11 @@ export default function KaryawanList() {
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Data Pribadi</p>
           </div>
 
-          <FormField label="NIK Karyawan" required help="16 digit angka sesuai KTP — unik per karyawan">
-            <Input value={form.nik}
-              onChange={e => setForm(f => ({ ...f, nik: e.target.value.replace(/\D/g, '').slice(0, 16) }))}
-              inputMode="numeric" maxLength={16}
-              placeholder="16 digit NIK, contoh: 3201012345678901" />
-          </FormField>
+          {editing && (
+            <FormField label="Kode Karyawan">
+              <Input value={editing.kode_karyawan} disabled />
+            </FormField>
+          )}
 
           <FormField label="Nama Lengkap" required>
             <Input value={form.nama_karyawan}
@@ -514,12 +546,12 @@ export default function KaryawanList() {
             Metode pembayaran gaji: <strong>Tunai</strong>
           </div>
 
-          {/* Info QR */}
+          {/* Info Kode Karyawan + QR */}
           {!editing && (
             <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-start gap-2">
               <QrCode size={16} className="text-purple-600 mt-0.5 flex-shrink-0" />
               <p className="text-xs text-purple-700">
-                <strong>QR Code</strong> akan otomatis dibuat saat karyawan disimpan. Format: <code className="bg-purple-100 px-1 rounded">KPELUS-000001</code> — permanen dan unik.
+                <strong>Kode Karyawan</strong> dan <strong>QR Code</strong> akan otomatis dibuat saat karyawan disimpan — permanen dan unik.
               </p>
             </div>
           )}
@@ -545,7 +577,7 @@ export default function KaryawanList() {
                   {selected.jabatan?.nama_jabatan} · {selected.departemen?.nama_departemen || 'Tidak ada departemen'}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">NIK: {selected.nik || getIDKaryawan(selected)}</span>
+                  <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">Kode: {selected.kode_karyawan}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${selected.status_aktif ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                     {selected.status_aktif ? 'Aktif' : 'Non-aktif'}
                   </span>
@@ -554,7 +586,7 @@ export default function KaryawanList() {
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
               {[
-                ['NIK', selected.nik || '-'],
+                ['Kode Karyawan', selected.kode_karyawan ?? '-'],
                 ['Bergabung', formatTanggal(selected.tanggal_bergabung)],
                 ['Pembayaran', 'Tunai'],
                 ['Gaji Harian', formatRupiah(selected.gaji_harian_override || selected.jabatan?.gaji_harian)],
@@ -586,6 +618,14 @@ export default function KaryawanList() {
         message={`Nonaktifkan "${deleting?.nama_karyawan}"? Data histori tetap tersimpan.`}
         onConfirm={handleDelete}
         onCancel={() => setDeleting(null)} />
+
+      <ConfirmDialog
+        open={bulkConfirm}
+        title="Hapus Karyawan Terpilih"
+        message={`Hapus ${selectedIds.size} karyawan terpilih secara permanen? Karyawan dengan kasbon belum lunas akan dilewati.`}
+        loading={bulkDeleting}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkConfirm(false)} />
     </div>
   )
 }

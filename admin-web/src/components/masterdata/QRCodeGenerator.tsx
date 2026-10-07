@@ -8,8 +8,7 @@ import { useNotification } from '../../context/NotificationContext'
 interface KaryawanQR {
   id: number
   nama_karyawan: string
-  nik: string
-  id_karyawan: string
+  kode_karyawan: string
   jabatan: { nama_jabatan: string } | null
   departemen?: { nama_departemen: string } | null
   qr?: { qr_code_value: string; scan_count: number; generated_at: string } | null
@@ -29,7 +28,7 @@ const QRCodeGenerator: React.FC = () => {
     setLoading(true)
     const { data } = await supabase
       .from('karyawan')
-      .select(`id, nama_karyawan, nik, id_karyawan,
+      .select(`id, nama_karyawan, kode_karyawan,
         jabatan(nama_jabatan), departemen(nama_departemen),
         karyawan_qr_code(qr_code_value, scan_count, generated_at)`)
       .eq('status_aktif', true)
@@ -72,8 +71,7 @@ const QRCodeGenerator: React.FC = () => {
     const q = search.toLowerCase()
     setFiltered(list.filter(k =>
       k.nama_karyawan.toLowerCase().includes(q) ||
-      (k.nik || '').toLowerCase().includes(q) ||
-      (k.id_karyawan || '').toLowerCase().includes(q)
+      String(k.kode_karyawan ?? '').includes(q)
     ))
   }, [search, list])
 
@@ -85,9 +83,8 @@ const QRCodeGenerator: React.FC = () => {
       return
     }
     setGenerating(true)
-    const idKaryawan = selected.id_karyawan || selected.nik
     // Nilai deterministik — tidak pakai timestamp agar stabil
-    const qrValue = `KPELUS-${idKaryawan}-${selected.id}`
+    const qrValue = `KRAKATAU-${selected.kode_karyawan}-${selected.id}`
     const { error: err } = await supabase
       .from('karyawan_qr_code')
       .insert({ karyawan_id: selected.id, qr_code_value: qrValue })
@@ -108,7 +105,7 @@ const QRCodeGenerator: React.FC = () => {
     if (!selected || !qrImages[selected.id]) return
     const link = document.createElement('a')
     link.href = qrImages[selected.id]
-    link.download = `QR_${selected.nik || selected.id_karyawan}_${selected.nama_karyawan}.png`
+    link.download = `QR_${selected.kode_karyawan}_${selected.nama_karyawan}.png`
     link.click()
   }
 
@@ -148,7 +145,7 @@ const QRCodeGenerator: React.FC = () => {
               <div class="jab">${escapeHtml(selected.jabatan?.nama_jabatan || '-')}</div>
               ${selected.departemen?.nama_departemen ? `<div style="font-size:5.5pt;opacity:.7">${escapeHtml(selected.departemen.nama_departemen)}</div>` : ''}
             </div>
-            <div><div class="idbadge">ID: ${escapeHtml(selected.nik || selected.id_karyawan)}</div></div>
+            <div><div class="idbadge">Kode: ${escapeHtml(String(selected.kode_karyawan))}</div></div>
           </div>
           <div class="card-right">
             <div class="qrwrap"><img src="${qrSrc}" /></div>
@@ -214,7 +211,7 @@ const QRCodeGenerator: React.FC = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm text-gray-900 truncate">{k.nama_karyawan}</p>
-                    <p className="text-xs text-gray-400">{k.nik || k.id_karyawan} · {k.jabatan?.nama_jabatan ?? '-'}</p>
+                    <p className="text-xs text-gray-400">{k.kode_karyawan} · {k.jabatan?.nama_jabatan ?? '-'}</p>
                   </div>
                   {hasQR
                     ? <ShieldCheck size={14} className="text-green-500 flex-shrink-0" />
@@ -233,7 +230,7 @@ const QRCodeGenerator: React.FC = () => {
               <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center">
                 <p className="font-bold text-gray-800">{selected.nama_karyawan}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {selected.nik || selected.id_karyawan} · {selected.jabatan?.nama_jabatan ?? '-'}
+                  {selected.kode_karyawan} · {selected.jabatan?.nama_jabatan ?? '-'}
                 </p>
               </div>
 
@@ -266,7 +263,7 @@ const QRCodeGenerator: React.FC = () => {
                           <div style={{ fontSize:6, opacity:.85, marginTop:1 }}>{selected.jabatan?.nama_jabatan || '-'}</div>
                         </div>
                         <div style={{ background:'rgba(255,255,255,.2)', border:'1px solid rgba(255,255,255,.3)', borderRadius:3, padding:'1px 4px', fontSize:5, fontWeight:600, display:'inline-block' }}>
-                          ID: {selected.nik || selected.id_karyawan}
+                          Kode: {selected.kode_karyawan}
                         </div>
                       </div>
                       <div style={{ width:76, background:'rgba(255,255,255,.08)', borderLeft:'1px solid rgba(255,255,255,.15)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'6px', gap:3, position:'relative', zIndex:1 }}>

@@ -9,6 +9,7 @@ import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
 import 'services/theme_service.dart';
 import 'services/locale_service.dart';
+import 'services/text_scale_service.dart';
 
 const _url  = 'https://zrgzersltowinheqtdpc.supabase.co';
 // "publishable key" = nama baru untuk anon key lama; nilainya sama, aman dipakai publik.
@@ -26,6 +27,7 @@ void main() async {
     Supabase.initialize(url: _url, publishableKey: _publishableKey),
     ThemeService().init(),
     localeService.init(),
+    TextScaleService().init(),
   ]);
   runApp(const MandorApp());
 }
@@ -37,15 +39,18 @@ class MandorApp extends StatefulWidget {
 
 class _MandorAppState extends State<MandorApp> {
   final _theme = ThemeService();
+  final _textScale = TextScaleService();
 
   @override void initState() {
     super.initState();
     _theme.addListener(_rebuild);
     localeService.addListener(_rebuild);
+    _textScale.addListener(_rebuild);
   }
   @override void dispose() {
     _theme.removeListener(_rebuild);
     localeService.removeListener(_rebuild);
+    _textScale.removeListener(_rebuild);
     super.dispose();
   }
   void _rebuild() => setState(() {});
@@ -64,6 +69,15 @@ class _MandorAppState extends State<MandorApp> {
     theme: _lightTheme(),
     darkTheme: _darkTheme(),
     home: const _SplashRouter(),
+    // Ukuran tampilan (zoom) dari Profile > Ukuran Tampilan — pakai
+    // textScaler, bukan Transform.scale, supaya area sentuh tombol tetap
+    // akurat (Transform.scale cuma mengubah tampilan visual, bukan hit-test).
+    builder: (context, child) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: TextScaler.linear(_textScale.scale),
+      ),
+      child: child!,
+    ),
   );
 
   // ── LIGHT ─────────────────────────────────────────────────

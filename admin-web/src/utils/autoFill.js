@@ -7,16 +7,6 @@ export const today = () => {
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
 }
 
-// Generate ID Karyawan: KRY-001, KRY-002, dst
-export const generateIDKaryawan = (existingData = []) => {
-  const nums = existingData
-    .map(d => d.id_karyawan || '')
-    .filter(k => k.startsWith('KRY-'))
-    .map(k => parseInt(k.replace('KRY-', '')) || 0)
-  const max = nums.length > 0 ? Math.max(...nums) : 0
-  return `KRY-${String(max + 1).padStart(3, '0')}`
-}
-
 // Generate kode project: PRJ-YYYY-NNN
 export const generateKodeProject = (existingData = []) => {
   const year = new Date().getFullYear()

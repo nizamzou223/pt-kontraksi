@@ -69,12 +69,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final karyawan = results[3] as List;
 
       // Tandai otomatis 'alfa' untuk hari-hari lalu yang belum diinput —
-      // berjalan begitu dashboard dibuka, tanpa perlu admin buka web dulu.
+      // berjalan begitu dashboard dibuka, lewat RPC yang sama dipakai admin-web
+      // (satu sumber kebenaran, lihat MIGRATION_AUTO_ALFA.sql).
       if (!_alfaAutoMarked) {
-        _alfaAutoMarked = await _svc.autoMarkAlfaLewat(
-          projectId: pid,
-          karyawanList: List<Map<String, dynamic>>.from(karyawan),
-        ); // gagal → dicoba lagi saat dashboard dimuat ulang (bukan diam selamanya)
+        _alfaAutoMarked = true;
+        await _svc.autoMarkAlfa();
       }
 
       final kasbonBulan = kasbonAll

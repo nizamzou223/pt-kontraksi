@@ -32,10 +32,10 @@ const isMissingFn = (error) =>
   error?.code === 'PGRST202' || /could not find the function|function .* does not exist/i.test(error?.message || '')
 
 export const inventoryService = {
-  // === KATEGORI ===
-  async getKategori(projectId) {
+  // === KATEGORI (global — gudang pusat, lihat FIX_GUDANG_PUSAT.sql) ===
+  async getKategori() {
     const { data, error } = await supabase.from('kategori_barang')
-      .select('*').eq('project_id', projectId).order('nama_kategori')
+      .select('*').order('nama_kategori')
     if (error) throw new Error(parseError(error))
     return data
   },
@@ -68,11 +68,11 @@ export const inventoryService = {
     return data
   },
 
-  // === BARANG ===
-  async getBarang(projectId) {
+  // === BARANG (global — gudang pusat, lihat FIX_GUDANG_PUSAT.sql) ===
+  async getBarang() {
     const { data, error } = await fetchAll(() => supabase.from('barang')
       .select('*, kategori_barang(nama_kategori), satuan_barang(nama_satuan, singkatan)')
-      .eq('project_id', projectId).order('nama_barang').order('id'))
+      .order('nama_barang').order('id'))
     if (error) throw new Error(parseError(error))
     return data
   },
@@ -187,33 +187,12 @@ export const inventoryService = {
     if (error) throw new Error(parseError(error))
     return data
   },
-  // Catat stok keluar. Bila ada project_tujuan_id (project lain), barang otomatis
-  // ditransfer: tercatat Stok Masuk di project tujuan & stoknya bertambah.
+  // Catat stok keluar. Barang sekarang satu gudang pusat (lihat
+  // FIX_GUDANG_PUSAT.sql) jadi tidak ada lagi transfer antar project — stok
+  // keluar cukup mengurangi stok global, project_id di baris ini hanya
+  // mencatat di project mana transaksinya terjadi.
   async createStokKeluar(payload) {
-    const tujuanId = parseInt(payload.project_tujuan_id)
-    if (!tujuanId || tujuanId === payload.project_id) return this._kurangiStok(payload)
-
-    // Transfer atomic: stok keluar di asal + stok masuk di tujuan dalam satu transaksi
-    const { error: rpcErr } = await supabase.rpc('transfer_stok', {
-      p_project_asal: payload.project_id,
-      p_project_tujuan: tujuanId,
-      p_barang_id: payload.barang_id,
-      p_jumlah: payload.jumlah,
-      p_tujuan: payload.tujuan,
-      p_nomor_referensi: payload.nomor_referensi || null,
-      p_nomor_bon: payload.nomor_bon || null,
-      p_catatan_bon: payload.catatan_bon || null,
-      p_nomor_rekap: payload.nomor_rekap || null,
-      p_catatan: payload.catatan || null,
-    })
-    if (!rpcErr) return { transfer: true }
-    if (!isMissingFn(rpcErr)) throw new Error(parseError(rpcErr))
-
-    // RPC transfer belum ada (MIGRATION_INVENTORY_FIX.sql belum dijalankan):
-    // tetap catat stok keluar seperti sebelumnya, tanpa menambah stok di project tujuan.
-    console.warn('transfer_stok belum tersedia — hanya dicatat sebagai stok keluar')
-    await this._kurangiStok(payload)
-    return { transfer: false }
+    return this._kurangiStok(payload)
   },
 
   async _kurangiStok(payload) {
@@ -299,12 +278,10 @@ export const inventoryService = {
 
     // Fallback manual (RPC belum tersedia)
     const { data: permintaan } = await supabase.from('permintaan_barang')
-      .select('*, barang(stok_saat_ini, project_id)').eq('id', id).single()
+      .select('*, barang(stok_saat_ini)').eq('id', id).single()
     if (!permintaan) throw new Error('Permintaan tidak ditemukan.')
     if (permintaan.status_permintaan !== 'pending')
       throw new Error(`Permintaan sudah diproses (status: ${permintaan.status_permintaan}).`)
-    if (permintaan.barang?.project_id !== permintaan.project_id)
-      throw new Error('Barang pada permintaan ini milik project lain. Tolak permintaan ini, lalu transfer barang ke project ini lewat Stok Keluar terlebih dahulu.')
 
     // BUG #7 FIX: validasi stok di backend (bukan frontend) sebagai sumber kebenaran
     if (permintaan.barang.stok_saat_ini < permintaan.jumlah_diminta)
@@ -460,10 +437,10 @@ export const inventoryService = {
     if (error) throw new Error(parseError(error))
   },
 
-  async getStokKritis(projectId) {
+  async getStokKritis() {
     const { data, error } = await supabase.from('barang')
       .select('*, satuan_barang(singkatan)')
-      .eq('project_id', projectId).order('stok_saat_ini', { ascending: true })
+      .order('stok_saat_ini', { ascending: true })
     if (error) throw new Error(parseError(error))
     return (data || []).filter(b => b.stok_saat_ini <= b.stok_minimal)
   },

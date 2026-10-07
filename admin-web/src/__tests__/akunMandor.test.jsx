@@ -89,7 +89,6 @@ describe('form Tambah Karyawan — tidak ada lagi bagian akun', () => {
   it('menyimpan karyawan golongan Mandor TIDAK pernah membuat akun', async () => {
     await bukaForm()
     fireEvent.change(screen.getByPlaceholderText('Nama lengkap karyawan'), { target: { value: 'Sari' } })
-    fireEvent.change(screen.getAllByRole('textbox').find(el => /16/.test(el.getAttribute('placeholder') || '')), { target: { value: '3201012345678902' } })
     await pilihGolongan('Mandor Gudang')
     fireEvent.click(screen.getByText('Simpan Data'))
     await waitFor(() => expect(h.created).toHaveBeenCalled())
@@ -99,8 +98,6 @@ describe('form Tambah Karyawan — tidak ada lagi bagian akun', () => {
   it('menyimpan karyawan non-mandor juga tidak pernah membuat akun', async () => {
     await bukaForm()
     fireEvent.change(screen.getByPlaceholderText('Nama lengkap karyawan'), { target: { value: 'Budi' } })
-    const nik = screen.getAllByRole('textbox').find(el => /nik|16/i.test(el.getAttribute('placeholder') || ''))
-    fireEvent.change(nik, { target: { value: '3201012345678901' } })
     await pilihGolongan('Tukang Batu')
     fireEvent.click(screen.getByText('Simpan Data'))
     await waitFor(() => expect(h.created).toHaveBeenCalled())

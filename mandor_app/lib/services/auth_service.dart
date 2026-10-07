@@ -13,9 +13,7 @@ class UserModel {
   final bool statusAktif;
   final Map<String, dynamic>? karyawan;
   final Map<String, dynamic>? project;
-  // NIK 16 digit adalah field resmi (lihat admin-web/migration_nik_16_digit.sql);
-  // id_karyawan hanya cadangan untuk data lama yang belum sempat diisi NIK-nya.
-  String get idKaryawan => karyawan?['nik'] as String? ?? karyawan?['id_karyawan'] as String? ?? '-';
+  String get kodeKaryawan => karyawan?['kode_karyawan']?.toString() ?? '-';
 
   UserModel({
     required this.id,
@@ -102,17 +100,17 @@ class AuthService {
     }
   }
 
-  // ── LOGIN via NIK (untuk karyawan / mandor) ───────────────
-  Future<UserModel> loginByNik(String nik, String password) async {
+  // ── LOGIN via Kode Karyawan (untuk karyawan / mandor) ──────
+  Future<UserModel> loginByKodeKaryawan(String kode, String password) async {
     try {
       // Sebelum login, klien (role anon) tidak boleh membaca tabel apa pun (RLS).
-      // Pencarian email dilakukan lewat RPC sempit email_for_nik (SECURITY DEFINER).
-      final email = await _client.rpc('email_for_nik', params: {'p_nik': nik.trim()});
+      // Pencarian email dilakukan lewat RPC sempit email_for_kode_karyawan (SECURITY DEFINER).
+      final email = await _client.rpc('email_for_kode_karyawan', params: {'p_kode': kode.trim()});
 
       if (email == null || (email as String).isEmpty) {
-        // Pesan sengaja seragam agar tidak membocorkan NIK mana yang terdaftar.
+        // Pesan sengaja seragam agar tidak membocorkan kode mana yang terdaftar.
         throw Exception(
-          'NIK atau password salah, atau akun belum dibuat.\n'
+          'Kode Karyawan atau password salah, atau akun belum dibuat.\n'
           'Hubungi administrator jika masalah berlanjut.',
         );
       }
@@ -120,7 +118,7 @@ class AuthService {
       // Login dengan email yang ditemukan
       return await login(email, password);
     } on AuthException catch (e) {
-      throw Exception(_parseNikError(e.message));
+      throw Exception(_parseLoginError(e.message));
     } on PostgrestException catch (e) {
       final m = e.message.toLowerCase();
       if (m.contains('fetch') || m.contains('network') || m.contains('connection') ||
@@ -142,7 +140,7 @@ class AuthService {
           id, email, nama_lengkap, role, status_aktif,
           karyawan_id, project_id,
           karyawan:karyawan_id (
-            id, nama_karyawan, nik, id_karyawan,
+            id, nama_karyawan, kode_karyawan,
             jabatan:jabatan_id ( id, nama_jabatan, gaji_harian, uang_makan, uang_transport )
           ),
           project:project_id (
@@ -278,13 +276,13 @@ class AuthService {
   User? get currentUser => _client.auth.currentUser;
 
   // ── PARSE ERROR ───────────────────────────────────────────
-  String _parseNikError(String msg) {
+  String _parseLoginError(String msg) {
     final m = msg.toLowerCase();
     if (m.contains('invalid login credentials') ||
         m.contains('invalid credentials') ||
         m.contains('wrong password') ||
         m.contains('invalid email or password')) {
-      return 'NIK atau password salah.\n'
+      return 'Kode Karyawan atau password salah.\n'
              'Pastikan password sesuai dengan yang\n'
              'didaftarkan oleh administrator.';
     }

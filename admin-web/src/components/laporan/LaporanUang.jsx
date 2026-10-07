@@ -44,7 +44,7 @@ export default function LaporanUang() {
     try {
       const pid = parseInt(selectedProject)
       const [brg, sm] = await Promise.all([
-        inventoryService.getBarang(pid),
+        inventoryService.getBarang(),
         inventoryService.getStokMasuk(pid),
       ])
       setBarang(brg)
@@ -207,7 +207,7 @@ export default function LaporanUang() {
                 <p className="text-amber-200 text-sm mt-1">Rekap nilai tahun {tahun}</p>
               </div>
               <div className="text-right shrink-0">
-                <p className="text-amber-200 text-xs">Total Nilai Stok (live)</p>
+                <p className="text-amber-200 text-xs">Total Nilai Stok Global (live)</p>
                 <p className="text-2xl font-extrabold">{formatRupiah(totalNilaiStok)}</p>
               </div>
             </div>
@@ -216,7 +216,7 @@ export default function LaporanUang() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 stagger">
             {[
               { label: `Nilai Pembelian ${tahun}`, val: formatRupiah(totalNilaiTahun), color: 'bg-green-50 border-green-100 text-green-700', icon: TrendingDown },
-              { label: 'Nilai Stok Saat Ini', val: formatRupiah(totalNilaiStok), color: 'bg-purple-50 border-purple-100 text-purple-700', icon: Wallet },
+              { label: 'Nilai Stok Saat Ini (Global)', val: formatRupiah(totalNilaiStok), color: 'bg-purple-50 border-purple-100 text-purple-700', icon: Wallet },
               { label: 'Rata-rata / Transaksi', val: formatRupiah(rataRataTransaksi), color: 'bg-blue-50 border-blue-100 text-blue-700', icon: Receipt },
             ].map((s, i) => (
               <div key={i} className={`rounded-2xl border p-4 flex items-center gap-3 transition-all hover:shadow-md ${s.color} animate-slideUp`}>

@@ -4,7 +4,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useProject } from '../../context/ProjectContext'
 import { useTheme } from '../../context/ThemeContext'
-import { useTabVisible } from '../../utils/pageActivity'
+import { useTabVisible, usePolling } from '../../utils/pageActivity'
+import { reportService } from '../../services/auditService'
 import {
   LayoutDashboard, Briefcase, DollarSign,
   Package, Settings, LogOut, Menu, X, ChevronDown,
@@ -12,6 +13,7 @@ import {
   Info, XCircle, Bell, Wifi, WifiOff, RefreshCw, Clock, BarChart2,
   User, Brain,
 } from 'lucide-react'
+import logoKrakatau from '../../assets/logo-krakatau.png'
 
 // ─────────────────────────────────────────────
 // MENU CONFIG
@@ -412,14 +414,9 @@ export const Sidebar = ({ isOpen, onClose }) => {
         <div className="relative flex items-center gap-3 px-4 py-4 mt-1"
           style={{ borderBottom: `1px solid ${sd.border}` }}>
           {/* Logo */}
-          <div className="relative w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg"
-            style={{ background: 'linear-gradient(135deg, #4059ad, #5b9bd5)', boxShadow: '0 4px 16px rgba(79,111,199,0.3)' }}>
-            <svg width="22" height="22" viewBox="0 0 44 44" fill="none">
-              <rect x="6" y="28" width="32" height="12" rx="2" fill="white" fillOpacity="0.95"/>
-              <rect x="10" y="16" width="24" height="14" fill="white" fillOpacity="0.85"/>
-              <rect x="16" y="8" width="12" height="10" fill="white" fillOpacity="0.75"/>
-              <rect x="20" y="4" width="4" height="6" fill="#bfdbfe"/>
-            </svg>
+          <div className="relative w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg overflow-hidden"
+            style={{ background: 'white', boxShadow: '0 4px 16px rgba(79,111,199,0.3)' }}>
+            <img src={logoKrakatau} alt="PT Krakatau Indah" width={34} height={34} style={{ objectFit: 'contain' }} />
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-black text-sm leading-tight" style={{ color: sd.text }}>PT Krakatau Indah</p>
@@ -605,6 +602,9 @@ export const Navbar = ({ onMenuToggle, sidebarOpen }) => {
   const [dropOpen, setDropOpen] = useState(false)
   const dropRef = useRef(null)
   const [lastUpdated, setLastUpdated] = useState(null)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [notifItems, setNotifItems] = useState([])
+  const notifRef = useRef(null)
 
   const nb = {
     bg:     isDark ? 'rgba(24,32,51,0.97)' : 'rgba(255,255,255,0.96)',
@@ -621,10 +621,17 @@ export const Navbar = ({ onMenuToggle, sidebarOpen }) => {
   useEffect(() => {
     const handler = (e) => {
       if (dropRef.current && !dropRef.current.contains(e.target)) setDropOpen(false)
+      if (notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  const loadNotifikasi = useCallback(() => {
+    reportService.getNotifikasi().then(setNotifItems).catch(() => {})
+  }, [])
+  useEffect(() => { loadNotifikasi() }, [loadNotifikasi])
+  usePolling(loadNotifikasi, 60000)
 
   // Listen for custom "dataRefreshed" events from pages
   useEffect(() => {
@@ -657,6 +664,66 @@ export const Navbar = ({ onMenuToggle, sidebarOpen }) => {
 
       {/* Real-time indicator */}
       <RealtimeBadge lastUpdated={lastUpdated} />
+
+      {/* Notifikasi */}
+      <div className="relative" ref={notifRef}>
+        <button
+          onClick={() => setNotifOpen(v => !v)}
+          title="Notifikasi"
+          className="relative p-2 rounded-xl transition-all duration-200"
+          style={{ color: nb.text }}
+          onMouseEnter={e => { e.currentTarget.style.background='rgba(79,111,199,0.1)'; e.currentTarget.style.color='#6784d8' }}
+          onMouseLeave={e => { e.currentTarget.style.background='transparent'; e.currentTarget.style.color=nb.text }}
+        >
+          <Bell size={18} />
+          {notifItems.length > 0 && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
+          )}
+        </button>
+
+        <div style={{
+          position: 'absolute', right: 0, top: 'calc(100% + 8px)',
+          width: 320, background: nb.dropBg, borderRadius: '16px',
+          boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.5)' : '0 8px 32px rgba(0,0,0,0.12)',
+          border: `1px solid ${nb.dropBorder}`, zIndex: 50,
+          transition: 'opacity 0.2s, transform 0.2s', transformOrigin: 'top right',
+          opacity: notifOpen ? 1 : 0,
+          transform: notifOpen ? 'scale(1)' : 'scale(0.95)',
+          pointerEvents: notifOpen ? 'auto' : 'none',
+        }}>
+          <div style={{ padding: '8px' }}>
+            <p style={{ fontSize: '10px', fontWeight: 700, color: nb.dropSub, textTransform: 'uppercase', letterSpacing: '0.12em', padding: '6px 10px' }}>
+              Notifikasi
+            </p>
+            {notifItems.length === 0 ? (
+              <p style={{ fontSize: '12px', color: nb.dropSub, padding: '14px 10px', textAlign: 'center' }}>
+                Tidak ada info baru
+              </p>
+            ) : notifItems.map(n => (
+              <button
+                key={n.id}
+                onClick={() => { navigate(n.path); setNotifOpen(false) }}
+                style={{
+                  width: '100%', textAlign: 'left', padding: '10px 12px', borderRadius: '10px',
+                  border: 'none', cursor: 'pointer', background: 'transparent',
+                  display: 'flex', alignItems: 'flex-start', gap: '10px',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.05)' : '#f9fafb' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <div style={{
+                  width: 8, height: 8, borderRadius: '50%', marginTop: 5, flexShrink: 0,
+                  background: n.severity === 'warning' ? '#f59e0b' : '#6784d8',
+                }} />
+                <div>
+                  <p style={{ fontWeight: 600, fontSize: '13px', color: nb.dropText, marginBottom: '2px' }}>{n.title}</p>
+                  <p style={{ fontSize: '12px', color: nb.dropSub }}>{n.message}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* Project selector */}
       <div className="relative" ref={dropRef}>
@@ -810,11 +877,11 @@ export const AlertInPage = ({ type = 'info', title, message, onClose, className 
 // ─────────────────────────────────────────────
 // CONFIRM DIALOG
 // ─────────────────────────────────────────────
-export const ConfirmDialog = ({ open, title, message, onConfirm, onCancel, variant = 'danger' }) => {
+export const ConfirmDialog = ({ open, title, message, onConfirm, onCancel, variant = 'danger', loading = false }) => {
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fadeIn" onClick={onCancel} />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fadeIn" onClick={loading ? undefined : onCancel} />
       <div className="relative bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-modalIn">
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-4 ${variant === 'danger' ? 'bg-red-100' : 'bg-blue-100'}`}>
           {variant === 'danger'
@@ -827,19 +894,21 @@ export const ConfirmDialog = ({ open, title, message, onConfirm, onCancel, varia
         <div className="flex gap-2.5">
           <button
             onClick={onCancel}
-            className="flex-1 py-2.5 text-sm rounded-xl border border-gray-200 hover:bg-gray-50 font-medium text-gray-700 transition-all"
+            disabled={loading}
+            className="flex-1 py-2.5 text-sm rounded-xl border border-gray-200 hover:bg-gray-50 font-medium text-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Batal
           </button>
           <button
             onClick={onConfirm}
-            className={`flex-1 py-2.5 text-sm rounded-xl text-white font-semibold transition-all active:scale-95 shadow-md
+            disabled={loading}
+            className={`flex-1 py-2.5 text-sm rounded-xl text-white font-semibold transition-all active:scale-95 shadow-md disabled:opacity-60 disabled:cursor-not-allowed
               ${variant === 'danger'
                 ? 'bg-red-600 hover:bg-red-700 shadow-red-200'
                 : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
               }`}
           >
-            Konfirmasi
+            {loading ? <div className="w-4 h-4 border-2 border-white/60 border-t-white rounded-full animate-spin mx-auto" /> : 'Konfirmasi'}
           </button>
         </div>
       </div>
@@ -935,12 +1004,15 @@ export const Button = ({ children, variant = 'primary', size = 'md', loading, ic
 // ─────────────────────────────────────────────
 // CARD
 // ─────────────────────────────────────────────
-export const Card = ({ children, className = '', title, action }) => (
+export const Card = ({ children, className = '', title, subtitle, action }) => (
   <div className={`bg-white rounded-2xl border border-blue-50 shadow-sm ${className}`}
     style={{ boxShadow: '0 1px 6px rgba(79,111,199,0.07)' }}>
     {(title || action) && (
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-        {title && <h3 className="font-bold text-gray-900 text-sm">{title}</h3>}
+        <div>
+          {title && <h3 className="font-bold text-gray-900 text-sm">{title}</h3>}
+          {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
+        </div>
         {action && <div>{action}</div>}
       </div>
     )}

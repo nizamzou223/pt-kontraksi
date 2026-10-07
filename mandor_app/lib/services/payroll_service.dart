@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class PayrollService {
@@ -99,7 +99,7 @@ class PayrollService {
     try {
       final data = await _client
           .from('karyawan')
-          .select('id, id_karyawan, nama_karyawan, nik, status_aktif, jabatan:jabatan_id(id, nama_jabatan, gaji_harian, uang_makan, uang_transport)')
+          .select('id, nama_karyawan, kode_karyawan, status_aktif, jabatan:jabatan_id(id, nama_jabatan, gaji_harian, uang_makan, uang_transport)')
           .eq('status_aktif', true)
           .order('nama_karyawan');
       return List<Map<String, dynamic>>.from(data);
@@ -117,7 +117,7 @@ class PayrollService {
     try {
       var q = _client
           .from('presensi')
-          .select('*, karyawan(id, id_karyawan, nama_karyawan, nik, jabatan:jabatan_id(nama_jabatan)), project(kode_project, nama_project)');
+          .select('*, karyawan(id, nama_karyawan, kode_karyawan, jabatan:jabatan_id(nama_jabatan)), project(kode_project, nama_project)');
       if (projectId != null) q = q.eq('project_id', projectId);
       if (karyawanId != null) q = q.eq('karyawan_id', karyawanId);
       if (tanggal != null) q = q.eq('tanggal', tanggal);
@@ -134,7 +134,7 @@ class PayrollService {
     try {
       final data = await _client
           .from('presensi')
-          .select('*, karyawan(id, id_karyawan, nama_karyawan, nik, jabatan:jabatan_id(nama_jabatan, gaji_harian, uang_makan, uang_transport)), project(id, kode_project, nama_project)')
+          .select('*, karyawan(id, nama_karyawan, kode_karyawan, jabatan:jabatan_id(nama_jabatan, gaji_harian, uang_makan, uang_transport)), project(id, kode_project, nama_project)')
           .eq('tanggal', tanggal)
           .order('karyawan_id');
 
@@ -183,23 +183,77 @@ class PayrollService {
     } catch (e) { throw Exception(_err(e)); }
   }
 
+  // ── CATAT PRESENSI MASUK/KELUAR (atomic) ─────────────────────
+  // Cek + tulis presensi dalam SATU transaksi database (lihat
+  // FIX_SCAN_PRESENSI_ATOMIC.sql) -- menghindari race condition "cek dulu
+  // baru tulis" yang sebelumnya bisa bentrok dengan UNIQUE constraint dan
+  // gagal dengan "Data sudah ada." kalau ada scan/tap lain yang menulis
+  // baris presensi yang sama persis di jeda antara cek dan tulis. Dipakai
+  // baik dari scan QR (qrValue diisi) maupun Absen Cepat tap manual
+  // (qrValue null, metodeInput = 'manual').
+  // Hasil 'hasil': 'masuk' | 'keluar' | 'lengkap'.
+  Future<Map<String, dynamic>> scanPresensiQr({
+    required int projectId,
+    required int karyawanId,
+    required String tanggal,
+    required String jam,
+    required String metodeInput,
+    String? qrValue,
+  }) async {
+    try {
+      final data = await _client.rpc('scan_presensi_qr', params: {
+        'p_project_id': projectId,
+        'p_karyawan_id': karyawanId,
+        'p_tanggal': tanggal,
+        'p_jam': jam,
+        'p_metode_input': metodeInput,
+        'p_qr_value': qrValue,
+      });
+      final row = (data as List).first as Map<String, dynamic>;
+      if (row['hasil'] == 'keluar') {
+        await _syncAutoLembur({
+          'karyawan_id': karyawanId,
+          'tanggal': tanggal,
+          'durasi_jam': row['durasi_jam'],
+          'status_kehadiran': 'hadir',
+        }, const {});
+      }
+      return row;
+    } catch (e) { throw Exception(_err(e)); }
+  }
+
   // ── UPSERT PRESENSI ─────────────────────────────────────────
   // ── CEK PRESENSI HARI INI ──────────────────────────────────
   Future<Map<String, dynamic>?> getPresensiHariIni({
     required int karyawanId, int? projectId, required String tanggal}) async {
     try {
-      final data = await _client
+      var q = _client
           .from('presensi')
           .select('id, jam_masuk, jam_keluar, status_kehadiran')
           .eq('karyawan_id', karyawanId)
-          .eq('tanggal', tanggal)
-          .maybeSingle();
+          .eq('tanggal', tanggal);
+      if (projectId != null) q = q.eq('project_id', projectId);
+      final data = await q.maybeSingle();
       return data != null ? Map<String, dynamic>.from(data) : null;
     } catch (e) { return null; }
   }
 
+  // Tandai 'alfa' semua karyawan yang belum punya presensi di hari yang
+  // sudah lewat (lihat MIGRATION_AUTO_ALFA.sql). Aman dipanggil berkali-kali.
+  Future<int> autoMarkAlfa() async {
+    try {
+      final result = await _client.rpc('auto_mark_alfa');
+      return (result as int?) ?? 0;
+    } catch (e) {
+      debugPrint('[autoMarkAlfa] gagal: $e');
+      return 0;
+    }
+  }
+
   Future<Map<String, dynamic>> upsertPresensi(Map<String, dynamic> payload) async {
     try {
+      // Constraint unik yang sebenarnya di presensi cuma (karyawan_id,
+      // tanggal) -- lihat FIX_PRESENSI_UNIQUE_CONSTRAINT.sql
       final data = await _client
           .from('presensi')
           .upsert(payload, onConflict: 'karyawan_id,tanggal')
@@ -226,93 +280,6 @@ class PayrollService {
     } catch (e) { throw Exception(_err(e)); }
   }
 
-  // ── AUTO TANDAI ALFA UNTUK HARI YANG SUDAH LEWAT ────────────
-  // Karyawan yang tidak diinput presensinya begitu tanggalnya lewat
-  // langsung ditandai 'alfa' di sini, dari mobile app — tidak perlu
-  // menunggu admin membuka halaman Presensi di admin-web dulu.
-  // ON CONFLICT DO NOTHING (ignoreDuplicates) memastikan presensi yang
-  // sudah ada (hadir/belum_lengkap/alfa manual) tidak pernah tertimpa.
-  /// Mengembalikan `true` bila proses berjalan tanpa galat fatal (dipakai pemanggil
-  /// untuk menandai "sudah dicoba" hanya setelah SUKSES — kalau gagal, biar dicoba
-  /// lagi di pemuatan berikutnya, bukan diam selamanya).
-  ///
-  /// Sengaja TIDAK memakai upsert+onConflict: nama constraint unik presensi yang
-  /// benar-benar aktif di DB pernah salah diasumsikan di sini sebelumnya (lihat
-  /// riwayat), dan PostgREST menolak ON CONFLICT yang tidak cocok persis dengan
-  /// constraint — kegagalannya pun dulu dibuang total sehingga tidak ketahuan.
-  /// Sebagai gantinya: cek dulu (karyawan, tanggal) mana yang sudah tercatat, lalu
-  /// INSERT baris baru satu per satu untuk yang benar-benar kosong — setiap baris
-  /// gagal (mis. ternyata sudah ada karena lomba data dari HP lain) dilewati sendiri
-  /// tanpa menggagalkan baris lainnya.
-  Future<bool> autoMarkAlfaLewat({
-    required int projectId,
-    required List<Map<String, dynamic>> karyawanList,
-    int lookbackDays = 14,
-  }) async {
-    if (karyawanList.isEmpty) return true; // tidak ada yang perlu ditandai — bukan kegagalan
-    try {
-      final today = DateTime.now();
-      final tanggalList = [
-        for (var i = 1; i <= lookbackDays; i++)
-          today.subtract(Duration(days: i)).toIso8601String().split('T')[0],
-      ];
-      final karyawanIds = karyawanList.map((k) => k['id']).toList();
-
-      // Satu karyawan hanya boleh satu presensi per hari (aturan yang sama dipakai
-      // upsertPresensi) — dicek lintas proyek, bukan cuma proyek ini, walau nanti
-      // kekurangannya ditandai atas nama `projectId`.
-      final existing = await _client
-          .from('presensi')
-          .select('karyawan_id, tanggal')
-          .inFilter('karyawan_id', karyawanIds)
-          .inFilter('tanggal', tanggalList);
-      final sudahAda = <String>{
-        for (final r in existing as List) '${r['karyawan_id']}|${r['tanggal']}',
-      };
-
-      final rows = <Map<String, dynamic>>[
-        for (final tgl in tanggalList)
-          for (final k in karyawanList)
-            if (!sudahAda.contains('${k['id']}|$tgl'))
-              {
-                'project_id': projectId,
-                'karyawan_id': k['id'],
-                'tanggal': tgl,
-                'status_kehadiran': 'alfa',
-                'metode_input': 'otomatis',
-                'catatan': 'Otomatis: tidak tercatat',
-              },
-      ];
-      if (rows.isEmpty) return true; // semua tanggal sudah tercatat
-
-      // Kirim beberapa sekaligus (bukan satu per satu berurutan, juga bukan satu
-      // batch besar) — tiap baris punya try/catch sendiri agar satu baris yang
-      // gagal (mis. baru saja dicatat dari HP lain) tidak menggagalkan sisanya.
-      var gagal = 0;
-      const paralel = 8;
-      for (var i = 0; i < rows.length; i += paralel) {
-        final grup = rows.sublist(i, (i + paralel).clamp(0, rows.length));
-        final hasil = await Future.wait(grup.map((row) async {
-          try {
-            await _client.from('presensi').insert(row);
-            return true;
-          } catch (e) {
-            debugPrint('autoMarkAlfaLewat: gagal 1 baris (karyawan ${row['karyawan_id']}, ${row['tanggal']}): $e');
-            return false;
-          }
-        }));
-        gagal += hasil.where((ok) => !ok).length;
-      }
-      if (gagal > 0) debugPrint('autoMarkAlfaLewat: $gagal dari ${rows.length} baris gagal ditandai (project $projectId).');
-      // Semua baris gagal → kemungkinan masalah sistemik (izin, dll), coba lagi nanti.
-      // Sebagian gagal (mis. baris itu barusan tercatat dari HP lain) → bukan kegagalan.
-      return gagal < rows.length;
-    } catch (e) {
-      debugPrint('autoMarkAlfaLewat gagal total (project $projectId): $e');
-      return false;
-    }
-  }
-
   // ── DELETE PRESENSI ─────────────────────────────────────────
   Future<void> deletePresensi(int id) async {
     try {
@@ -331,11 +298,11 @@ class PayrollService {
   // ── VALIDASI QR CODE ────────────────────────────────────────
   Future<Map<String, dynamic>?> validateQRCode(String qrValue, {int? projectId}) async {
     try {
-      if (!qrValue.startsWith('KPELUS-')) throw Exception('QR Code tidak valid. Format tidak dikenali.');
+      if (!qrValue.startsWith('KRAKATAU-')) throw Exception('QR Code tidak valid. Format tidak dikenali.');
 
       final qrData = await _client
           .from('karyawan_qr_code')
-          .select('*, karyawan(id, id_karyawan, nama_karyawan, nik, status_aktif, jabatan:jabatan_id(nama_jabatan, gaji_harian, uang_makan, uang_transport))')
+          .select('*, karyawan(id, nama_karyawan, kode_karyawan, status_aktif, jabatan:jabatan_id(nama_jabatan, gaji_harian, uang_makan, uang_transport))')
           .eq('qr_code_value', qrValue)
           .eq('status_aktif', true)
           .maybeSingle();
@@ -362,7 +329,7 @@ class PayrollService {
     try {
       final data = await _client
           .from('project_karyawan')
-          .select('karyawan(id, id_karyawan, nama_karyawan, nik, status_aktif, jabatan:jabatan_id(nama_jabatan, gaji_harian, uang_makan, uang_transport))')
+          .select('karyawan(id, nama_karyawan, kode_karyawan, status_aktif, jabatan:jabatan_id(nama_jabatan, gaji_harian, uang_makan, uang_transport))')
           .eq('project_id', projectId)
           .eq('status_assignment', 'aktif');
       final result = <Map<String, dynamic>>[];
@@ -379,7 +346,7 @@ class PayrollService {
   }) async {
     try {
       var q = _client.from('lembur')
-          .select('id, project_id, karyawan_id, tanggal, jam_mulai, jam_selesai, durasi_jam, tarif_lembur, total_lembur, status_persetujuan, catatan, created_at, karyawan:karyawan_id(id, id_karyawan, nama_karyawan, nik, jabatan:jabatan_id(nama_jabatan, gaji_harian)), project:project_id(nama_project)');
+          .select('id, project_id, karyawan_id, tanggal, jam_mulai, jam_selesai, durasi_jam, tarif_lembur, total_lembur, status_persetujuan, catatan, created_at, karyawan:karyawan_id(id, nama_karyawan, kode_karyawan, jabatan:jabatan_id(nama_jabatan, gaji_harian)), project:project_id(nama_project)');
       if (projectId != null) q = q.eq('project_id', projectId);
       if (status != null) q = q.eq('status_persetujuan', status);
       if (tanggalDari != null) q = q.gte('tanggal', tanggalDari);
@@ -410,12 +377,14 @@ class PayrollService {
   }
 
   // ── KASBON ──────────────────────────────────────────────────
-  Future<List<Map<String, dynamic>>> getKasbon({int? projectId, int? karyawanId}) async {
+  Future<List<Map<String, dynamic>>> getKasbon({int? projectId, int? karyawanId, String? tanggalDari, String? tanggalSampai}) async {
     try {
       var q = _client.from('kasbon')
-          .select('*, karyawan(id, id_karyawan, nama_karyawan, nik, jabatan:jabatan_id(nama_jabatan)), project(id, kode_project, nama_project)');
+          .select('*, karyawan(id, nama_karyawan, kode_karyawan, jabatan:jabatan_id(nama_jabatan)), project(id, kode_project, nama_project)');
       if (projectId != null) q = q.eq('project_id', projectId);
       if (karyawanId != null) q = q.eq('karyawan_id', karyawanId);
+      if (tanggalDari != null) q = q.gte('tanggal_kasbon', tanggalDari);
+      if (tanggalSampai != null) q = q.lte('tanggal_kasbon', tanggalSampai);
       final data = await q.order('tanggal_kasbon', ascending: false);
       return List<Map<String, dynamic>>.from(data);
     } catch (e) { throw Exception(_err(e)); }
@@ -458,7 +427,7 @@ class PayrollService {
     try {
       final data = await _client
           .from('karyawan')
-          .select('id, id_karyawan, nama_karyawan, nik, status_aktif, tanggal_bergabung, gaji_harian_override, jabatan:jabatan_id(id, nama_jabatan, gaji_harian), departemen:departemen_id(id, nama_departemen)')
+          .select('id, nama_karyawan, kode_karyawan, status_aktif, tanggal_bergabung, gaji_harian_override, jabatan:jabatan_id(id, nama_jabatan, gaji_harian), departemen:departemen_id(id, nama_departemen)')
           .order('nama_karyawan');
       return List<Map<String, dynamic>>.from(data);
     } catch (e) { throw Exception(_err(e)); }
@@ -481,7 +450,7 @@ class PayrollService {
 
   // ── BUAT QR CODE KARYAWAN (sekali, permanen) ───────────────
   Future<String> generateKaryawanQR(int karyawanId) async {
-    final qrValue = 'KPELUS-${karyawanId.toString().padLeft(6, '0')}';
+    final qrValue = 'KRAKATAU-${karyawanId.toString().padLeft(6, '0')}';
     try {
       final existing = await _client
           .from('karyawan_qr_code')

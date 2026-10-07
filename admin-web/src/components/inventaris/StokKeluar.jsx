@@ -2,10 +2,9 @@ import { usePolling } from '../../utils/pageActivity'
 import { generateNomorSK } from '../../utils/autoFill'
 import { useState, useEffect, useCallback } from 'react'
 import toast from 'react-hot-toast'
-import { Plus, Download, ArrowUpRight, Package, AlertTriangle, ArrowLeftRight } from 'lucide-react'
+import { Plus, Download, ArrowUpRight, Package, AlertTriangle } from 'lucide-react'
 import { Card, Button, Modal, Input, Textarea, Select, FormField, Table, PageHeader, SearchBar, AlertInPage, DropdownSelect } from '../common'
 import { inventoryService } from '../../services/inventoryService'
-import { projectService } from '../../services/projectService'
 import { exportService } from '../../services/exportService'
 import { useProject } from '../../context/ProjectContext'
 import { formatTanggal, formatRupiah } from '../../utils/formatters'
@@ -19,7 +18,6 @@ export default function StokKeluar() {
   const { activeProject } = useProject()
   const [data, setData] = useState([])
   const [barang, setBarang] = useState([])
-  const [allProjects, setAllProjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -27,7 +25,6 @@ export default function StokKeluar() {
   const [form, setForm] = useState({
     barang_id: '',
     jumlah: '',
-    project_tujuan_id: '',
     tujuan: '',
     nomor_referensi: generateNomorSK(),
     nomor_bon: '',
@@ -40,14 +37,12 @@ export default function StokKeluar() {
     if (!activeProject?.id) return
     if (!silent) setLoading(true)
     try {
-      const [stokData, barangData, projectData] = await Promise.all([
+      const [stokData, barangData] = await Promise.all([
         inventoryService.getStokKeluar(activeProject.id),
-        inventoryService.getBarang(activeProject.id),
-        projectService.getProjects(),
+        inventoryService.getBarang(),
       ])
       setData(stokData)
       setBarang(barangData)
-      setAllProjects(projectData)
       broadcastRefresh()
     } catch (e) { if (!silent) toast.error(e.message) }
     finally { if (!silent) setLoading(false) }
@@ -58,7 +53,7 @@ export default function StokKeluar() {
   usePolling(() => load(true), AUTO_REFRESH_MS)
 
   const resetForm = () => setForm({
-    barang_id: '', jumlah: '', project_tujuan_id: '', tujuan: '',
+    barang_id: '', jumlah: '', tujuan: '',
     nomor_referensi: generateNomorSK(),
     nomor_bon: '', catatan_bon: '', nomor_rekap: '', catatan: '',
   })
@@ -66,23 +61,15 @@ export default function StokKeluar() {
   const handleSave = async () => {
     if (!form.barang_id) return toast.error('Pilih barang')
     if (!form.jumlah || parseInt(form.jumlah) <= 0) return toast.error('Jumlah harus lebih dari 0')
-    if (!form.project_tujuan_id && !form.tujuan) return toast.error('Pilih project tujuan atau isi keterangan tujuan')
-
-    // Buat string tujuan gabungan: nama project + keterangan
-    const projectTujuan = allProjects.find(p => p.id === parseInt(form.project_tujuan_id))
-    const tujuanFinal = [
-      projectTujuan ? `[${projectTujuan.nama_project}]` : '',
-      form.tujuan,
-    ].filter(Boolean).join(' ')
+    if (!form.tujuan) return toast.error('Isi keterangan tujuan')
 
     setSaving(true)
     try {
-      const hasil = await inventoryService.createStokKeluar({
+      await inventoryService.createStokKeluar({
         project_id: activeProject.id,
         barang_id: parseInt(form.barang_id),
         jumlah: parseInt(form.jumlah),
-        project_tujuan_id: form.project_tujuan_id ? parseInt(form.project_tujuan_id) : null,
-        tujuan: tujuanFinal || 'Tidak disebutkan',
+        tujuan: form.tujuan,
         nomor_referensi: form.nomor_referensi,
         nomor_bon: form.nomor_bon,
         catatan_bon: form.catatan_bon,
@@ -90,15 +77,7 @@ export default function StokKeluar() {
         catatan: form.catatan,
       })
       syncBus.emitAll('stok')
-      if (hasil?.transfer) {
-        syncBus.emitAll('barang')
-        toast.success(`✓ Stok keluar dicatat & stok masuk ke ${projectTujuan?.nama_project || 'project tujuan'}`)
-      } else if (hasil && hasil.transfer === false) {
-        toast.success('✓ Stok keluar berhasil dicatat')
-        toast('Stok belum otomatis masuk ke project tujuan — jalankan MIGRATION_INVENTORY_FIX.sql untuk mengaktifkan transfer antar project.', { icon: 'ℹ️', duration: 7000 })
-      } else {
-        toast.success('✓ Stok keluar berhasil dicatat')
-      }
+      toast.success('✓ Stok keluar berhasil dicatat')
       setModal(false)
       resetForm()
       load()
@@ -282,44 +261,13 @@ export default function StokKeluar() {
             <AlertInPage type="error" message={`Jumlah melebihi stok! Stok tersedia hanya ${selectedBarang.stok_saat_ini} ${selectedBarang.satuan_barang?.singkatan}.`} />
           )}
 
-          {/* ── PROJECT TUJUAN ── */}
-          <FormField label="Project Tujuan" help="Pilih project yang menerima barang ini">
-            <DropdownSelect
-              value={form.project_tujuan_id}
-              onChange={v => setForm(f => ({ ...f, project_tujuan_id: v }))}
-              options={[
-                { value: '', label: '— Pilih project tujuan —' },
-                ...allProjects.map(p => ({ value: String(p.id), label: `${p.nama_project} (${p.kode_project})` })),
-              ]}
-            />
-          </FormField>
-          {form.project_tujuan_id && parseInt(form.project_tujuan_id) !== activeProject.id && (
-            <div className="flex items-start gap-2 rounded-xl p-3 text-xs border bg-emerald-50 border-emerald-100 text-emerald-700">
-              <ArrowLeftRight size={14} className="flex-shrink-0 mt-0.5" />
-              <span>Barang akan otomatis <strong>masuk ke stok project tujuan</strong> (tercatat di Stok Masuk & History Barang project tersebut).</span>
-            </div>
-          )}
-
-          <FormField label="Keterangan / Lokasi Spesifik" help="Opsional — misal: Gudang A, Lantai 3, nama pekerja, dll">
+          <FormField label="Tujuan / Keperluan" required help="Misal: Gudang A, Lantai 3, nama pekerja, dll">
             <Input
               value={form.tujuan}
               onChange={e => setForm(f => ({ ...f, tujuan: e.target.value }))}
-              placeholder="Lokasi / keterangan tambahan..."
+              placeholder="Lokasi / keperluan..."
             />
           </FormField>
-
-          {/* Preview tujuan final */}
-          {(form.project_tujuan_id || form.tujuan) && (
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700">
-              <p className="font-semibold text-slate-500 mb-1 uppercase tracking-wide text-[10px]">Preview Tujuan</p>
-              <p className="font-medium">
-                {form.project_tujuan_id
-                  ? `[${allProjects.find(p => p.id === parseInt(form.project_tujuan_id))?.nama_project}]`
-                  : ''
-                } {form.tujuan}
-              </p>
-            </div>
-          )}
 
           <FormField label="No. Referensi">
             <Input value={form.nomor_referensi} readOnly className="bg-gray-50 text-gray-400 cursor-default" />

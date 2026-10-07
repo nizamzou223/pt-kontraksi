@@ -6,6 +6,7 @@ import { Card, Button, Modal, Input, RupiahInput, Select, FormField, Table, Page
 import { FormSection, FieldRow } from '../common/FormSection'
 import { inventoryService } from '../../services/inventoryService'
 import { useProject } from '../../context/ProjectContext'
+import { useAuth } from '../../context/AuthContext'
 import { exportService } from '../../services/exportService'
 import { formatRupiah } from '../../utils/formatters'
 import { syncBus } from '../../utils/syncBus'
@@ -45,6 +46,9 @@ const AUTO_REFRESH_MS = 45000
 
 export default function BarangList() {
   const { activeProject } = useProject()
+  const { isHR } = useAuth()
+  const bolehTulis = isHR() // Katalog barang sekarang gudang pusat (global) —
+  // hanya admin/hr yang boleh menulis, lihat FIX_GUDANG_PUSAT.sql
   const [data, setData] = useState([])
   const [kategori, setKategori] = useState([])
   const [satuan, setSatuan] = useState([])
@@ -72,25 +76,18 @@ export default function BarangList() {
   })
 
   const load = useCallback(async () => {
-    if (!activeProject?.id) {
-      setData([])
-      setKategori([])
-      setSatuan([])
-      setLoading(false)
-      return
-    }
     setLoading(true)
     try {
       const [barangData, kategoriData, satuanData] = await Promise.all([
-        inventoryService.getBarang(activeProject.id),
-        inventoryService.getKategori(activeProject.id),
+        inventoryService.getBarang(),
+        inventoryService.getKategori(),
         inventoryService.getSatuan(),
       ])
       setData(Array.isArray(barangData) ? barangData : [])
       setKategori(Array.isArray(kategoriData) ? kategoriData : [])
       setSatuan(Array.isArray(satuanData) ? satuanData : [])
     } catch (e) { toast.error(e.message) } finally { setLoading(false) }
-  }, [activeProject])
+  }, [])
 
   useEffect(() => { load() }, [load])
 
@@ -116,6 +113,7 @@ export default function BarangList() {
   }
 
   const openStokMasuk = (r) => {
+    if (!activeProject?.id) return toast.error('Pilih project terlebih dahulu')
     setSelectedBarang(r)
     setStokForm({
       jumlah: '', harga_satuan: r.harga_beli || '',
@@ -125,6 +123,7 @@ export default function BarangList() {
   }
 
   const openStokKeluar = (r) => {
+    if (!activeProject?.id) return toast.error('Pilih project terlebih dahulu')
     setSelectedBarang(r)
     setStokKeluarForm({
       jumlah: '', tujuan: '', nomor_referensi: generateNomorSK(), catatan: ''
@@ -145,7 +144,7 @@ export default function BarangList() {
     if (kategori.some(k => k.nama_kategori.toLowerCase() === nama.toLowerCase()))
       return toast.error('Kategori sudah ada')
     try {
-      const k = await inventoryService.createKategori({ project_id: activeProject.id, nama_kategori: nama })
+      const k = await inventoryService.createKategori({ nama_kategori: nama })
       setKategori(list => [...list, k].sort((a, b) => a.nama_kategori.localeCompare(b.nama_kategori)))
       setForm(f => ({ ...f, kategori_id: String(k.id) }))
       setKategoriBaru(null)
@@ -159,7 +158,6 @@ export default function BarangList() {
     try {
       const payload = {
         ...form,
-        project_id: activeProject.id,
         kategori_id: parseInt(form.kategori_id),
         satuan_id: parseInt(form.satuan_id),
         harga_beli: parseFloat(form.harga_beli),
@@ -254,14 +252,14 @@ export default function BarangList() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Inventaris Barang" subtitle={activeProject?.nama_project}
+      <PageHeader title="Inventaris Barang" subtitle="Katalog Barang (Gudang Pusat)"
         action={
           <div className="flex gap-2">
             <Button variant="outline" icon={Download} size="sm"
-              onClick={() => { exportService.exportInventarisPDF?.(filtered, activeProject?.nama_project); toast.success('PDF diunduh') }}>
+              onClick={() => { exportService.exportInventarisPDF?.(filtered, 'Gudang Pusat'); toast.success('PDF diunduh') }}>
               Export PDF
             </Button>
-            <Button icon={Plus} onClick={openAdd} disabled={!activeProject}>Tambah Barang</Button>
+            {bolehTulis && <Button icon={Plus} onClick={openAdd}>Tambah Barang</Button>}
           </div>
         } />
 
@@ -333,12 +331,12 @@ export default function BarangList() {
               <button onClick={() => openStokKeluar(r)} className="p-1.5 rounded hover:bg-orange-50 text-orange-500" title="Stok Keluar">
                 <ArrowDown size={14} />
               </button>
-              <button onClick={() => openEdit(r)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
+              {bolehTulis && <button onClick={() => openEdit(r)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
                 <Edit2 size={14} />
-              </button>
-              <button onClick={() => setDeleting(r)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Hapus">
+              </button>}
+              {bolehTulis && <button onClick={() => setDeleting(r)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Hapus">
                 <Trash2 size={14} />
-              </button>
+              </button>}
             </div>
           )},
         ]} />

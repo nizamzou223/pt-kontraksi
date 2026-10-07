@@ -11,7 +11,6 @@ export const jabatanSchema = z.object({
 
 export const karyawanSchema = z.object({
   nama_karyawan: z.string().min(2, 'Nama minimal 2 karakter').max(150),
-  nik: z.string().regex(/^\d{16}$/, 'NIK harus tepat 16 digit angka'),
   email: z.string().email('Email tidak valid').optional().or(z.literal('')),
   no_hp: z.string().max(15).optional().or(z.literal('')),
   jabatan_id: z.number().min(1, 'Pilih jabatan'),

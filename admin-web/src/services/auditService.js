@@ -39,7 +39,18 @@ export const reportService = {
     const { data } = await supabase.from('rekap_gaji_mingguan')
       .select('periode_mulai, gaji_bersih, gaji_kotor, total_potongan_kasbon')
       .gte('periode_mulai', start).order('periode_mulai')
-    return data || []
+    // rekap_gaji_mingguan punya 1 baris per KARYAWAN per periode -- jumlahkan dulu
+    // per minggu, supaya grafik tren menampilkan total per minggu (1 batang per
+    // minggu), bukan 1 batang per karyawan yang numpuk di tanggal yang sama.
+    const perMinggu = {}
+    ;(data || []).forEach(g => {
+      const key = g.periode_mulai
+      if (!perMinggu[key]) perMinggu[key] = { periode_mulai: key, gaji_bersih: 0, gaji_kotor: 0, total_potongan_kasbon: 0 }
+      perMinggu[key].gaji_bersih += parseFloat(g.gaji_bersih || 0)
+      perMinggu[key].gaji_kotor += parseFloat(g.gaji_kotor || 0)
+      perMinggu[key].total_potongan_kasbon += parseFloat(g.total_potongan_kasbon || 0)
+    })
+    return Object.values(perMinggu).sort((a, b) => a.periode_mulai.localeCompare(b.periode_mulai))
   },
 
   async getKehadiranStats(projectId, bulan, tahun) {
@@ -64,15 +75,47 @@ export const reportService = {
     return data || []
   },
 
-  // Fix: ambil semua barang lalu filter di JS, bukan column-vs-column di REST
+  // Fix: ambil semua barang lalu filter di JS, bukan column-vs-column di REST.
+  // barang sekarang katalog global (gudang pusat, lihat FIX_GUDANG_PUSAT.sql)
+  // -- tidak lagi berelasi ke satu project, jadi embed project(...) dihapus
+  // (sebelumnya akan gagal karena relasinya sudah tidak ada).
   async getStokKritisSemua() {
     const { data, error } = await supabase.from('barang')
-      .select('*, project(nama_project, kode_project), satuan_barang(singkatan)')
+      .select('*, satuan_barang(singkatan)')
       .order('stok_saat_ini', { ascending: true })
     if (error) {
       console.error('getStokKritisSemua error:', error)
       return []
     }
     return (data || []).filter(b => b.stok_saat_ini <= b.stok_minimal)
+  },
+
+  // Ringkasan info untuk menu notifikasi di header — hanya hal yang perlu
+  // perhatian admin (bukan histori), masing-masing link ke halaman terkait.
+  async getNotifikasi() {
+    const [stok, gajiDraft, lemburPending, kasbonOutstanding] = await Promise.all([
+      this.getStokKritisSemua(),
+      supabase.from('rekap_gaji_mingguan').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
+      supabase.from('lembur').select('id', { count: 'exact', head: true }).eq('status_persetujuan', 'pending'),
+      supabase.from('kasbon').select('id', { count: 'exact', head: true }).eq('status_lunas', false),
+    ])
+    const items = []
+    if (stok.length > 0) items.push({
+      id: 'stok', severity: 'warning', title: 'Stok Kritis',
+      message: `${stok.length} barang di bawah stok minimal`, path: '/inventaris/barang',
+    })
+    if ((gajiDraft.count || 0) > 0) items.push({
+      id: 'gaji', severity: 'info', title: 'Gaji Pending Verifikasi',
+      message: `${gajiDraft.count} rekap gaji mingguan menunggu verifikasi`, path: '/penggajian/gaji-mingguan',
+    })
+    if ((lemburPending.count || 0) > 0) items.push({
+      id: 'lembur', severity: 'info', title: 'Lembur Menunggu Persetujuan',
+      message: `${lemburPending.count} pengajuan lembur belum disetujui`, path: '/penggajian/lembur',
+    })
+    if ((kasbonOutstanding.count || 0) > 0) items.push({
+      id: 'kasbon', severity: 'warning', title: 'Kasbon Outstanding',
+      message: `${kasbonOutstanding.count} kasbon belum lunas`, path: '/penggajian/kasbon',
+    })
+    return items
   },
 }

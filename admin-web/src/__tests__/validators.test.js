@@ -2,16 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { karyawanSchema, kasbonSchema, loginSchema } from '../utils/validators'
 
 const karyawanOk = {
-  nama_karyawan: 'Budi Santoso', nik: '3273010101010001', jabatan_id: 1,
+  nama_karyawan: 'Budi Santoso', jabatan_id: 1,
   tanggal_bergabung: '2026-01-01', status_aktif: true,
 }
 
 describe('karyawanSchema — validasi input', () => {
   it('menerima data valid', () => expect(karyawanSchema.safeParse(karyawanOk).success).toBe(true))
-  it.each(['123', '32730101010100012', 'abcdefghijklmnop', '3273 0101 0101 0001', "1' OR '1'='1"])(
-    'menolak NIK tidak valid %j', (nik) => {
-      expect(karyawanSchema.safeParse({ ...karyawanOk, nik }).success).toBe(false)
-    })
   it('menolak nama terlalu pendek / terlalu panjang', () => {
     expect(karyawanSchema.safeParse({ ...karyawanOk, nama_karyawan: 'A' }).success).toBe(false)
     expect(karyawanSchema.safeParse({ ...karyawanOk, nama_karyawan: 'A'.repeat(151) }).success).toBe(false)

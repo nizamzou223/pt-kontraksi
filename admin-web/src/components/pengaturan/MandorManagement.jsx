@@ -111,7 +111,7 @@ export function MandorManagement() {
 
         supabase
           .from('karyawan')
-          .select('id, nama_karyawan, nik, id_karyawan, status_aktif, jabatan:jabatan_id ( nama_jabatan )')
+          .select('id, nama_karyawan, kode_karyawan, status_aktif, jabatan:jabatan_id ( nama_jabatan )')
           .eq('status_aktif', true)
           .order('nama_karyawan'),
 
@@ -593,7 +593,7 @@ export function MandorManagement() {
             </p>
             <FormField
               label="Karyawan Terkait"
-              hint="Otomatis berisi karyawan berjabatan Mandor dari Master Data — mengisi NIK di profil mobile & menautkan presensi/lembur/kasbon. Peran akun mengikuti jabatannya."
+              hint="Otomatis berisi karyawan berjabatan Mandor dari Master Data — mengisi Kode Karyawan di profil mobile & menautkan presensi/lembur/kasbon. Peran akun mengikuti jabatannya."
             >
               <DropdownSelect
                 value={form.karyawan_id || ''}
@@ -616,7 +616,7 @@ export function MandorManagement() {
                       !data.some(d => d.id !== editItem?.id && String(d.karyawan_id) === String(k.id)))
                     .map(k => ({
                       value: String(k.id),
-                      label: `${k.nama_karyawan} — NIK ${k.nik || k.id_karyawan || '-'} (${k.jabatan?.nama_jabatan})`,
+                      label: `${k.nama_karyawan} — Kode ${k.kode_karyawan ?? '-'} (${k.jabatan?.nama_jabatan})`,
                     })),
                 ]}
               />

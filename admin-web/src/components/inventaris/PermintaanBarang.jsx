@@ -31,7 +31,7 @@ export default function PermintaanBarang() {
       if (filterStatus !== 'all') filters.status_permintaan = filterStatus
       const [permintaanData, barangData, karyawanData] = await Promise.all([
         inventoryService.getPermintaan(activeProject.id, filters),
-        inventoryService.getBarang(activeProject.id),
+        inventoryService.getBarang(),
         projectService.getKaryawanByProject(activeProject.id),
       ])
       setData(permintaanData); setBarang(barangData); setKaryawan(karyawanData.map(pk => pk.karyawan).filter(Boolean))

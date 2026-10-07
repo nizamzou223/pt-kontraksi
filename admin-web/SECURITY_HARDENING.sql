@@ -69,22 +69,27 @@ RETURNS SETOF bigint LANGUAGE sql STABLE SECURITY DEFINER SET search_path = publ
      AND pk.status_assignment = 'aktif'
 $$;
 
--- Akses proyek untuk data INVENTARIS: admin/hr semua, mandor & mandor_gudang hanya proyeknya
+-- Akses proyek untuk data INVENTARIS: admin/hr semua, mandor & mandor_gudang hanya proyeknya.
+-- pid IS NULL (data tanpa project) selalu diizinkan, bukan ditolak -- lihat
+-- can_access_field_project di bawah untuk alasan lengkapnya (FIX_RLS_ALFA_MANDOR.sql).
 CREATE OR REPLACE FUNCTION can_access_project(pid bigint)
 RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT CASE
     WHEN app_role() IN ('admin','hr')              THEN true
-    WHEN app_role() IN ('mandor','mandor_gudang')  THEN pid IN (SELECT app_project_ids())
+    WHEN app_role() IN ('mandor','mandor_gudang')  THEN pid IS NULL OR pid IN (SELECT app_project_ids())
     ELSE false
   END
 $$;
 
--- Akses proyek untuk data SDM/GAJI lapangan (presensi, lembur, kasbon): mandor_gudang TIDAK termasuk
+-- Akses proyek untuk data SDM/GAJI lapangan (presensi, lembur, kasbon): mandor_gudang TIDAK termasuk.
+-- pid IS NULL = presensi "alfa" otomatis (lihat MIGRATION_AUTO_ALFA.sql), yang
+-- sengaja tidak terikat project manapun -- harus tetap kelihatan oleh semua
+-- mandor, bukan disembunyikan oleh "NULL IN (...)" yang jatuh ke false di RLS.
 CREATE OR REPLACE FUNCTION can_access_field_project(pid bigint)
 RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT CASE
     WHEN app_role() IN ('admin','hr') THEN true
-    WHEN app_role() = 'mandor'        THEN pid IN (SELECT app_project_ids())
+    WHEN app_role() = 'mandor'        THEN pid IS NULL OR pid IN (SELECT app_project_ids())
     ELSE false
   END
 $$;

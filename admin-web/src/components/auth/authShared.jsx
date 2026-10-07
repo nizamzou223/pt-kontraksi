@@ -3,6 +3,7 @@ import { Sun, Moon, Languages } from 'lucide-react'
 import { useTheme } from '../../context/ThemeContext'
 import { useLang } from '../../context/LanguageContext'
 import { authText } from '../../i18n/authStrings'
+import logoKrakatau from '../../assets/logo-krakatau.png'
 
 // ── Palet halaman autentikasi (terang / gelap) ──────────────────────────────
 export function authPalette(dark) {
@@ -102,23 +103,11 @@ export function Field({ id, label, icon: Icon, right, error, p, ...inputProps })
   )
 }
 
-// ── Logo gedung (dipakai di panel merek & header mobile) ──
+// ── Logo PT Krakatau Indah (dipakai di panel merek & header mobile) ──
 export function BrandMark({ size = 44 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 52 52" fill="none" aria-hidden="true">
-      <rect x="8" y="30" width="36" height="18" rx="2" fill="white" fillOpacity="0.92"/>
-      <rect x="12" y="18" width="28" height="14" fill="white" fillOpacity="0.82"/>
-      <rect x="17" y="9" width="18" height="11" fill="white" fillOpacity="0.72"/>
-      <rect x="24" y="3" width="4" height="8" rx="1" fill="rgba(147,197,253,0.9)"/>
-      <circle cx="26" cy="2.5" r="1.5" fill="rgba(251,191,36,0.95)"/>
-      <rect x="12" y="34" width="6" height="7" rx="1" fill="rgba(79,111,199,0.45)"/>
-      <rect x="22" y="34" width="8" height="7" rx="1" fill="rgba(79,111,199,0.45)"/>
-      <rect x="34" y="34" width="6" height="7" rx="1" fill="rgba(79,111,199,0.45)"/>
-      <rect x="22" y="38" width="8" height="10" rx="1" fill="rgba(79,111,199,0.55)"/>
-      <rect x="15" y="21" width="5" height="6" rx="1" fill="rgba(79,111,199,0.3)"/>
-      <rect x="24" y="21" width="5" height="6" rx="1" fill="rgba(79,111,199,0.3)"/>
-      <rect x="33" y="21" width="5" height="6" rx="1" fill="rgba(79,111,199,0.3)"/>
-    </svg>
+    <img src={logoKrakatau} alt="PT Krakatau Indah" width={size} height={size}
+      style={{ width: size, height: size, objectFit: 'contain', borderRadius: '50%' }} />
   )
 }
 

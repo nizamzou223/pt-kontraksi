@@ -238,10 +238,11 @@ class SupabaseAiRepository implements AiRepository {
         final dari = addWeeks(mingguIni, -minggu);
         final sampai = addDays(mingguIni, -1); // minggu terakhir yang sudah lengkap
 
+        // barang sekarang katalog global (gudang pusat, lihat
+        // admin-web/FIX_GUDANG_PUSAT.sql) -- tidak lagi punya project_id.
         final barang = await _semua((a, b) => _db
             .from('barang')
             .select('id, nama_barang, kode_barang, stok_saat_ini, stok_minimal, satuan_barang(singkatan)')
-            .eq('project_id', projectId)
             .order('id')
             .range(a, b));
         final keluar = await _semua((a, b) => _db

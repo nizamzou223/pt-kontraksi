@@ -29,7 +29,7 @@ export default function StokMasuk() {
     try {
       const [stokData, barangData] = await Promise.all([
         inventoryService.getStokMasuk(activeProject.id),
-        inventoryService.getBarang(activeProject.id),
+        inventoryService.getBarang(),
       ])
       setData(stokData)
       setBarang(barangData)

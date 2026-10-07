@@ -134,7 +134,7 @@ export default function KasbonList() {
 
   const filtered = data.filter(d =>
     (d.karyawan?.nama_karyawan || '').toLowerCase().includes(search.toLowerCase()) ||
-    (d.karyawan?.nik || '').includes(search)
+    String(d.karyawan?.kode_karyawan ?? '').includes(search)
   )
 
   const totalOutstanding = data.filter(d => !d.status_lunas).reduce((s, k) => s + parseFloat(k.sisa_kasbon || 0), 0)
@@ -194,7 +194,7 @@ export default function KasbonList() {
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-40">
             <label className="text-xs font-bold text-gray-500 uppercase tracking-wide block mb-1.5">Cari Karyawan</label>
-            <SearchBar value={search} onChange={setSearch} placeholder="Nama / NIK..." />
+            <SearchBar value={search} onChange={setSearch} placeholder="Nama / Kode Karyawan..." />
           </div>
           <div>
             <label className="text-xs font-bold text-gray-500 uppercase tracking-wide block mb-1.5">Filter Project</label>

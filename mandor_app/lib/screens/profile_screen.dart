@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/theme_service.dart';
+import '../services/text_scale_service.dart';
 import '../services/biometric_service.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/app_overlay.dart';
@@ -10,7 +11,8 @@ import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final UserModel user;
-  const ProfileScreen({super.key, required this.user});
+  final Map<String, dynamic>? activeProject;
+  const ProfileScreen({super.key, required this.user, this.activeProject});
   @override State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
@@ -18,9 +20,15 @@ class _ProfileScreenState extends State<ProfileScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _entryCtrl;
   final _themeService = ThemeService();
+  final _textScaleService = TextScaleService();
   final _bio = BiometricService();
   bool _isEnglish = localeService.isEnglish;
   bool _bioAvailable = false, _bioEnabled = false;
+
+  // Proyek yang sedang dipilih di Dashboard (lihat home_screen.dart
+  // _selectedProject) harus menang atas proyek default login (widget.user.project),
+  // supaya Profile selalu sinkron dengan pilihan terbaru mandor.
+  Map<String, dynamic>? get _effectiveProject => widget.activeProject ?? widget.user.project;
 
   @override void initState() {
     super.initState();
@@ -58,6 +66,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ── Helpers ───────────────────────────────────────────────
   bool get _isDark => _themeService.isDark;
+  double get _textScale => _textScaleService.scale;
 
   Color get _bg   => _isDark ? const Color(0xFF0D1421) : const Color(0xFFF4F7FF);
   Color get _card => _isDark ? const Color(0xFF182033) : Colors.white;
@@ -103,7 +112,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           const SizedBox(height: 16),
 
           // ── Proyek ────────────────────────────────────────
-          if (widget.user.project != null) ...[
+          if (_effectiveProject != null) ...[
             SlideUp(delay: const Duration(milliseconds: 100), child: _buildProjectCard(context)),
             const SizedBox(height: 16),
           ],
@@ -174,12 +183,12 @@ class _ProfileScreenState extends State<ProfileScreen>
               style: const TextStyle(color: Colors.white, fontSize: 15,
                   fontWeight: FontWeight.w600)),
         ),
-        if (widget.user.idKaryawan != '-') ...[
+        if (widget.user.kodeKaryawan != '-') ...[
           const SizedBox(height: 6),
           Row(children: [
             Icon(Icons.badge_outlined, size: 13, color: Colors.white.withValues(alpha: 0.7)),
             const SizedBox(width: 4),
-            Text('NIK: ${widget.user.idKaryawan}',
+            Text('Kode: ${widget.user.kodeKaryawan}',
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.8),
                     fontSize: 15, fontWeight: FontWeight.w500)),
           ]),
@@ -202,8 +211,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
       _divider(_border),
       _InfoRow(
-        label: context.s.nikLabel,
-        value: widget.user.idKaryawan,
+        label: context.s.kodeKaryawanLabel,
+        value: widget.user.kodeKaryawan,
         icon: Icons.badge_rounded,
         isDark: _isDark,
       ),
@@ -242,21 +251,21 @@ class _ProfileScreenState extends State<ProfileScreen>
       const SizedBox(height: 4),
       _InfoRow(
         label: context.s.projectNameLabel,
-        value: widget.user.project!['nama_project'] as String? ?? '-',
+        value: _effectiveProject!['nama_project'] as String? ?? '-',
         icon: Icons.business_center_outlined,
         isDark: _isDark,
       ),
       _divider(_border),
       _InfoRow(
         label: context.s.projectCodeLabel,
-        value: widget.user.project!['kode_project'] as String? ?? '-',
+        value: _effectiveProject!['kode_project'] as String? ?? '-',
         icon: Icons.tag_rounded,
         isDark: _isDark,
       ),
       _divider(_border),
       _InfoRow(
         label: context.s.locationLabel,
-        value: widget.user.project!['lokasi'] as String? ?? '-',
+        value: _effectiveProject!['lokasi'] as String? ?? '-',
         icon: Icons.location_on_outlined,
         isDark: _isDark,
       ),
@@ -358,6 +367,58 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
           ),
         ]),
+      ),
+      Divider(height: 1, color: _border),
+      // Ukuran tampilan (zoom) — pilihan tetap S/M/L/XL, bukan slider bebas
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(children: [
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: _isDark ? const Color(0xFF3A2E1A) : const Color(0xFFFFFBEB),
+              borderRadius: BorderRadius.circular(10)),
+            child: Icon(Icons.format_size_rounded, size: 18,
+              color: _isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(context.s.textSizeLabel, style: TextStyle(fontSize: 16,
+                fontWeight: FontWeight.w600, color: _text)),
+            Text(context.s.textSizeSub, style: TextStyle(fontSize: 15, color: _sub)),
+          ])),
+        ]),
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: TextScaleService.levels.map((lvl) {
+          const labels = ['S', 'M', 'L', 'XL'];
+          final idx = TextScaleService.levels.indexOf(lvl);
+          final active = _textScale == lvl;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => _textScaleService.set(lvl),
+              child: Container(
+                margin: EdgeInsets.only(right: idx < 3 ? 8 : 0),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: active
+                      ? AppColors.brand600
+                      : (_isDark ? const Color(0xFF1E2740) : const Color(0xFFF1F5F9)),
+                  border: Border.all(
+                    color: active
+                        ? AppColors.brand600
+                        : _border),
+                ),
+                child: Text(labels[idx], textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14 + (idx * 1.5), fontWeight: FontWeight.w700,
+                    color: active ? Colors.white : _sub)),
+              ),
+            ),
+          );
+        }).toList(),
       ),
       if (_bioAvailable) ...[
         Divider(height: 1, color: _border),

@@ -125,8 +125,7 @@ function ringkasPresensi(rows) {
 const kapital = s => (s ? String(s).charAt(0).toUpperCase() + String(s).slice(1) : '-')
 const jumlah = (arr, f) => arr.reduce((t, r) => t + (parseFloat(f(r)) || 0), 0)
 const dicetakInfo = () => `Dicetak: ${new Date().toLocaleString('id-ID')}`
-// NIK 16 digit wajib berupa teks (angka akan dipotong Excel jadi notasi ilmiah)
-const nikKaryawan = r => String(r.karyawan?.nik || r.karyawan?.id_karyawan || '-')
+const kodeKaryawan = r => r.karyawan?.kode_karyawan ?? '-'
 const namaGolongan = r => r.karyawan?.jabatan?.nama_jabatan || 'Tanpa Golongan'
 const dalamGaji = r => !!r.catatan?.includes('Sudah dalam Gaji')
 const sumberLembur = r => (dalamGaji(r) ? 'Hari Kerja' : r.catatan?.startsWith('Otomatis') ? 'Auto' : 'Manual')
@@ -195,6 +194,60 @@ async function pdfLaporan({ title, info = [], color = PDF_BLUE, stripe = [240, 2
 const tgl = () => new Date().toISOString().slice(0, 10)
 const slug = s => String(s || '').replace(/\s+/g, '-')
 
+// ── Laporan Mingguan Harian: satu "paket pekerjaan" (grup kerja) per export run.
+// Pengelompokan dipilih manual oleh admin saat export (bukan field tersimpan di
+// database) supaya skema data tetap sederhana — lihat PresensiList.jsx.
+const HARI_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
+const BULAN_SINGKAT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+function daftarTanggal(dari, sampai) {
+  const out = []
+  const d = new Date(dari + 'T00:00:00')
+  const akhir = new Date(sampai + 'T00:00:00')
+  while (d <= akhir) {
+    const iso = d.toISOString().slice(0, 10)
+    out.push({ iso, hari: HARI_ID[d.getDay()], label: `${String(d.getDate()).padStart(2, '0')}-${BULAN_SINGKAT[d.getMonth()]}` })
+    d.setDate(d.getDate() + 1)
+  }
+  return out
+}
+
+// Gabung presensi + lembur + kasbon per karyawan untuk satu rentang tanggal.
+// Jml Total = (hari hadir × upah harian) + total lembur (Rp) − total kasbon
+// periode ini — rumus bersih, tidak meniru potongan berjenjang gaji mingguan
+// (itu urusan modul Penggajian, laporan ini murni rekap presensi per-pekerjaan).
+function rekapMingguanHarian({ presensiRows, lemburRows, kasbonRows, tanggalMulai, tanggalSelesai }) {
+  const tanggalList = daftarTanggal(tanggalMulai, tanggalSelesai)
+  const byKaryawan = {}
+  const baris = (id, r) => (byKaryawan[id] ||= {
+    nama: r.karyawan?.nama_karyawan || '-',
+    golongan: r.karyawan?.jabatan?.nama_jabatan || '-',
+    upahHarian: parseFloat(r.karyawan?.gaji_harian_override || r.karyawan?.jabatan?.gaji_harian || 0),
+    hadir: {}, totalLembur: 0, totalKasbon: 0,
+  })
+
+  presensiRows.forEach(r => {
+    const row = baris(r.karyawan_id, r)
+    if (r.status_kehadiran === 'hadir') row.hadir[r.tanggal] = true
+  })
+  lemburRows.forEach(r => {
+    const row = baris(r.karyawan_id, r)
+    row.totalLembur += parseFloat(r.total_lembur || 0)
+  })
+  kasbonRows.forEach(r => {
+    const row = baris(r.karyawan_id, r)
+    row.totalKasbon += parseFloat(r.jumlah_kasbon || 0)
+  })
+
+  const list = Object.values(byKaryawan).map(row => {
+    const jmlHari = tanggalList.filter(t => row.hadir[t.iso]).length
+    const jumlahUpah = jmlHari * row.upahHarian
+    const jmlTotal = jumlahUpah + row.totalLembur - row.totalKasbon
+    return { ...row, jmlHari, jumlahUpah, jmlTotal }
+  }).sort((a, b) => a.nama.localeCompare(b.nama))
+
+  return { tanggalList, list }
+}
+
 
 export const exportService = {
 
@@ -234,7 +287,7 @@ export const exportService = {
       title: 'PT Krakatau Indah — Detail Gaji Mingguan', info, emptyText: 'Belum ada data gaji',
       cols: [
         { h: 'No',            w: 5,  fn: (r, i) => i, align: 'center' },
-        { h: 'NIK',           w: 20, fn: r => nikKaryawan(r) },
+        { h: 'Kode Karyawan',           w: 20, fn: r => kodeKaryawan(r) },
         { h: 'Nama',          w: 26, fn: r => r.karyawan?.nama_karyawan || '-' },
         { h: 'Golongan',      w: 20, fn: r => r.karyawan?.jabatan?.nama_jabatan || '-' },
         { h: 'Hari Hadir',    w: 11, fn: r => parseInt(r.total_hari_hadir || 0), align: 'center' },
@@ -287,7 +340,7 @@ export const exportService = {
       title: `PT Krakatau Indah — Detail Gaji ${bulanStr} ${tahun}`, info, emptyText: 'Belum ada data gaji',
       cols: [
         { h: 'No',            w: 5,  fn: (r, i) => i, align: 'center' },
-        { h: 'NIK',           w: 20, fn: r => nikKaryawan(r) },
+        { h: 'Kode Karyawan',           w: 20, fn: r => kodeKaryawan(r) },
         { h: 'Nama',          w: 26, fn: r => r.karyawan?.nama_karyawan || '-' },
         { h: 'Golongan',      w: 20, fn: r => r.karyawan?.jabatan?.nama_jabatan || '-' },
         { h: 'Hari Hadir',    w: 11, fn: r => parseInt(r.total_hari_hadir || 0), align: 'center' },
@@ -316,7 +369,7 @@ export const exportService = {
       ],
       cols: [
         { h: 'No',           w: 5,  fn: (r, i) => i, align: 'center' },
-        { h: 'NIK',          w: 20, fn: r => nikKaryawan(r) },
+        { h: 'Kode Karyawan',          w: 20, fn: r => kodeKaryawan(r) },
         { h: 'Nama',         w: 26, fn: r => r.karyawan?.nama_karyawan || '-' },
         { h: 'Golongan',     w: 20, fn: r => r.karyawan?.jabatan?.nama_jabatan || '-' },
         { h: 'Tanggal',      w: 14, fn: r => formatTanggal(r.tanggal) },
@@ -355,8 +408,7 @@ export const exportService = {
       emptyText: 'Belum ada data presensi',
       cols: [
         { h: 'No',           w: 5,  fn: (r, i) => i, align: 'center' },
-        // NIK 16 digit harus teks, kalau angka Excel memotongnya jadi notasi ilmiah
-        { h: 'NIK',          w: 20, fn: r => String(r.karyawan?.nik || r.karyawan?.id_karyawan || '-') },
+                { h: 'Kode Karyawan', w: 16, fn: r => r.karyawan?.kode_karyawan ?? '-' },
         { h: 'Nama',         w: 26, fn: r => r.karyawan?.nama_karyawan || '-' },
         { h: 'Golongan',     w: 20, fn: r => r.karyawan?.jabatan?.nama_jabatan || '-' },
         { h: 'Project',      w: 24, fn: r => r.project?.nama_project || '-' },
@@ -418,9 +470,9 @@ export const exportService = {
         },
         {
           judul: 'Detail per Karyawan',
-          head: ['No', 'NIK', 'Nama', 'Hari', 'Gaji Pokok', 'Makan', 'Transport', 'Lembur', 'Kasbon', 'Bersih', 'Status'],
+          head: ['No', 'Kode Karyawan', 'Nama', 'Hari', 'Gaji Pokok', 'Makan', 'Transport', 'Lembur', 'Kasbon', 'Bersih', 'Status'],
           body: bodyPerGolongan(data, kolom, (r, no) => [
-            no, nikKaryawan(r), r.karyawan?.nama_karyawan || '-', parseInt(r.total_hari_hadir || 0),
+            no, kodeKaryawan(r), r.karyawan?.nama_karyawan || '-', parseInt(r.total_hari_hadir || 0),
             rp(r.total_gaji_pokok), rp(r.total_uang_makan), rp(r.total_uang_transport), rp(r.total_uang_lembur),
             rp(r.total_potongan_kasbon), rp(r.gaji_bersih), kapital(r.status),
           ]),
@@ -463,9 +515,9 @@ export const exportService = {
         },
         {
           judul: 'Detail per Karyawan',
-          head: ['No', 'NIK', 'Nama', 'Hari', 'Lembur', 'Kasbon', 'Gaji Bersih'],
+          head: ['No', 'Kode Karyawan', 'Nama', 'Hari', 'Lembur', 'Kasbon', 'Gaji Bersih'],
           body: bodyPerGolongan(data, kolom, (r, no) => [
-            no, nikKaryawan(r), r.karyawan?.nama_karyawan || '-', parseInt(r.total_hari_hadir || 0),
+            no, kodeKaryawan(r), r.karyawan?.nama_karyawan || '-', parseInt(r.total_hari_hadir || 0),
             rp(r.total_uang_lembur), rp(r.total_kasbon_potong), rp(r.total_gaji_bersih),
           ]),
           foot: data.length ? [
@@ -511,7 +563,7 @@ export const exportService = {
       const uang = uangHarianPresensi(r)
       body.push([
         ++no,
-        String(r.karyawan?.nik || r.karyawan?.id_karyawan || '-'),
+        r.karyawan?.kode_karyawan ?? '-',
         r.karyawan?.nama_karyawan || '-',
         r.project?.nama_project || '-',
         r.jam_masuk?.slice(0, 5) || '-',
@@ -532,7 +584,7 @@ export const exportService = {
     }
     autoTable(doc, {
       startY,
-      head: [['No', 'NIK', 'Nama', 'Project', 'Masuk', 'Keluar', 'Durasi', 'Uang Harian', 'Status', 'Catatan']],
+      head: [['No', 'Kode Karyawan', 'Nama', 'Project', 'Masuk', 'Keluar', 'Durasi', 'Uang Harian', 'Status', 'Catatan']],
       body,
       foot: rows.length ? [[
         { content: `TOTAL  (${s.total} karyawan)`, colSpan: 6 },
@@ -618,9 +670,9 @@ export const exportService = {
       label: 'Laporan Kasbon',
       filename: `kasbon-${tgl()}.pdf`,
       tables: [{
-        head: ['No', 'NIK', 'Nama', 'Golongan', 'Project', 'Tanggal', 'Jumlah', 'Sisa', 'Status'],
+        head: ['No', 'Kode Karyawan', 'Nama', 'Golongan', 'Project', 'Tanggal', 'Jumlah', 'Sisa', 'Status'],
         body: rows.length ? rows.map((r, i) => [
-          i + 1, nikKaryawan(r), r.karyawan?.nama_karyawan || '-', r.karyawan?.jabatan?.nama_jabatan || '-',
+          i + 1, kodeKaryawan(r), r.karyawan?.nama_karyawan || '-', r.karyawan?.jabatan?.nama_jabatan || '-',
           r.project?.nama_project || '-', formatTanggal(r.tanggal_kasbon),
           formatRupiah(r.jumlah_kasbon || 0), formatRupiah(r.sisa_kasbon || 0), r.status_lunas ? 'Lunas' : 'Outstanding',
         ]) : [[{ content: 'Belum ada data kasbon', colSpan: 9, styles: { halign: 'center', textColor: [100, 116, 139] } }]],
@@ -637,6 +689,65 @@ export const exportService = {
           if (d.section === 'foot' && d.column.index >= 6) d.cell.styles.halign = d.column.index === 8 ? 'center' : 'right'
         },
       }],
+    })
+  },
+
+  // ── LAPORAN MINGGUAN HARIAN per Pekerjaan ───────────────────────────────────
+  // Meniru rekap absensi mingguan proyek manual: satu tabel per "paket
+  // pekerjaan" (grup kerja) dengan kolom harian Minggu–Sabtu.
+  async exportLaporanMingguanHarianExcel({ presensiRows, lemburRows, kasbonRows, namaProject, namaPekerjaan, tanggalMulai, tanggalSelesai }) {
+    const XLSX = await import('xlsx-js-style')
+    const { tanggalList, list } = rekapMingguanHarian({ presensiRows, lemburRows, kasbonRows, tanggalMulai, tanggalSelesai })
+    const info = [
+      `Project: ${namaProject}  |  Pekerjaan: ${namaPekerjaan || '-'}`,
+      `Periode: ${formatTanggal(tanggalMulai)} – ${formatTanggal(tanggalSelesai)}`,
+      dicetakInfo(),
+    ]
+    const cols = [
+      { h: 'No', w: 4, fn: (r, i) => i, align: 'center' },
+      { h: 'Nama', w: 22, fn: r => r.nama },
+      { h: 'Golongan', w: 16, fn: r => r.golongan },
+      ...tanggalList.map(t => ({ h: `${t.hari}\n${t.label}`, w: 9, fn: r => r.hadir[t.iso] ? 'Hadir' : '-', align: 'center' })),
+      { h: 'Jml Hari', w: 9, fn: r => r.jmlHari, align: 'center' },
+      { h: 'Upah Harian', w: 14, fn: r => r.upahHarian, rp: true },
+      { h: 'Jumlah Upah', w: 15, fn: r => r.jumlahUpah, rp: true },
+      { h: 'Lembur (Rp)', w: 14, fn: r => r.totalLembur, rp: true },
+      { h: 'Kasbon', w: 13, fn: r => r.totalKasbon, rp: true },
+      { h: 'Jml Total', w: 15, fn: r => r.jmlTotal, rp: true },
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, buildReportSheet(XLSX, {
+      title: `PT Krakatau Indah — Laporan Mingguan: ${namaPekerjaan || namaProject}`, info,
+      emptyText: 'Tidak ada data presensi pada periode ini',
+      cols, rows: list,
+      total: { 'Jml Hari': 'sum', 'Jumlah Upah': 'sum', 'Lembur (Rp)': 'sum', Kasbon: 'sum', 'Jml Total': 'sum' },
+    }), 'Laporan Mingguan')
+    XLSX.writeFile(wb, `laporan-mingguan-${slug(namaPekerjaan || namaProject)}-${tgl()}.xlsx`)
+  },
+
+  async exportLaporanMingguanHarianPDF({ presensiRows, lemburRows, kasbonRows, namaProject, namaPekerjaan, tanggalMulai, tanggalSelesai }) {
+    const { tanggalList, list } = rekapMingguanHarian({ presensiRows, lemburRows, kasbonRows, tanggalMulai, tanggalSelesai })
+    const head = ['No', 'Nama', 'Golongan', ...tanggalList.map(t => `${t.hari}\n${t.label}`),
+      'Hari', 'Upah Harian', 'Jumlah Upah', 'Lembur', 'Kasbon', 'Jml Total']
+    const body = list.length ? list.map((r, i) => [
+      i + 1, r.nama, r.golongan,
+      ...tanggalList.map(t => r.hadir[t.iso] ? 'H' : '-'),
+      r.jmlHari, formatRupiah(r.upahHarian), formatRupiah(r.jumlahUpah),
+      formatRupiah(r.totalLembur), formatRupiah(r.totalKasbon), formatRupiah(r.jmlTotal),
+    ]) : [[{ content: 'Tidak ada data presensi pada periode ini', colSpan: head.length, styles: { halign: 'center', textColor: [100, 116, 139] } }]]
+    const foot = list.length ? [
+      { content: `TOTAL (${list.length} karyawan)`, colSpan: 3 + tanggalList.length },
+      jumlah(list, r => r.jmlHari), '', formatRupiah(jumlah(list, r => r.jumlahUpah)),
+      formatRupiah(jumlah(list, r => r.totalLembur)), formatRupiah(jumlah(list, r => r.totalKasbon)),
+      formatRupiah(jumlah(list, r => r.jmlTotal)),
+    ] : undefined
+
+    await pdfLaporan({
+      title: `Laporan Mingguan — ${namaPekerjaan || namaProject}`,
+      info: [`Project: ${namaProject}  |  Periode: ${formatTanggal(tanggalMulai)} – ${formatTanggal(tanggalSelesai)}`],
+      label: 'Laporan Mingguan Harian',
+      filename: `laporan-mingguan-${slug(namaPekerjaan || namaProject)}-${tgl()}.pdf`,
+      tables: [{ head, body, foot, fontSize: 7 }],
     })
   },
 
@@ -669,7 +780,7 @@ export const exportService = {
     rowInfo('Nama', k.nama_karyawan || '-', 14, 24)
     rowInfo('Periode', `${formatTanggal(rekap.periode_mulai)} – ${formatTanggal(rekap.periode_selesai)}`, pageW / 2, 22)
     y += 6
-    rowInfo('ID / NIK', k.id_karyawan || k.nik || '-', 14, 24)
+    rowInfo('Kode Karyawan', k.kode_karyawan ?? '-', 14, 24)
     rowInfo('Status', (rekap.status || '-').toUpperCase(), pageW / 2, 22)
     y += 6
     rowInfo('Jabatan', k.jabatan?.nama_jabatan || '-', 14, 24)
@@ -784,7 +895,7 @@ export const exportService = {
       ],
       cols: [
         { h: 'No',       w: 5,  fn: (r, i) => i, align: 'center' },
-        { h: 'NIK',      w: 20, fn: r => nikKaryawan(r) },
+        { h: 'Kode Karyawan',      w: 20, fn: r => kodeKaryawan(r) },
         { h: 'Nama',     w: 26, fn: r => r.karyawan?.nama_karyawan || '-' },
         { h: 'Golongan', w: 20, fn: r => r.karyawan?.jabatan?.nama_jabatan || '-' },
         { h: 'Project',  w: 24, fn: r => r.project?.nama_project || '-' },

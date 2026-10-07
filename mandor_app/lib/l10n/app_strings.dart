@@ -127,12 +127,14 @@ class AppStrings {
   String get darkModeOff        => _en ? 'Light mode active'    : 'Mode terang aktif';
   String get languageLabel      => _en ? 'Language'             : 'Bahasa / Language';
   String get languageCurrent    => _en ? 'English'              : 'Indonesia';
+  String get textSizeLabel      => _en ? 'Display Size'         : 'Ukuran Tampilan';
+  String get textSizeSub        => _en ? 'Make text & icons bigger or smaller' : 'Perbesar atau perkecil teks & ikon';
   String get biometricLabel     => _en ? 'Biometric Login'      : 'Login Biometrik';
   String get biometricSubOn     => _en ? 'Fingerprint / Face ID active'     : 'Sidik jari / Face ID aktif';
   String get biometricSubOff    => _en ? 'Use fingerprint or Face ID'        : 'Gunakan sidik jari atau Face ID';
   String get appVersion         => 'Mandor App v1.0.0 · PT Krakatau Indah';
   String get fullNameLabel      => _en ? 'Full Name'       : 'Nama Lengkap';
-  String get nikLabel           => _en ? 'Employee ID'     : 'NIK';
+  String get kodeKaryawanLabel  => _en ? 'Employee Code'   : 'Kode Karyawan';
   String get roleLabel          => _en ? 'Role'            : 'Role';
   String get positionLabel      => _en ? 'Position'        : 'Jabatan';
   String get projectNameLabel   => _en ? 'Project Name'    : 'Nama Proyek';
@@ -193,7 +195,7 @@ class AppStrings {
   // ── Cash Advance / Kasbon ─────────────────────────────────
   String get cashAdvTitle         => _en ? 'Cash Advance'          : 'Kasbon';
   String get applyKasbon          => _en ? '+ Apply Cash Advance'  : '+ Ajukan Kasbon';
-  String get searchEmpNIK         => _en ? 'Search employee name / ID...' : 'Cari nama / NIK karyawan...';
+  String get searchEmpCode        => _en ? 'Search employee name / code...' : 'Cari nama / kode karyawan...';
   String get outstanding          => _en ? 'Outstanding'           : 'Outstanding';
   String get totalKasbon          => _en ? 'Total Cash Advance'    : 'Total Kasbon';
   String get deleteKasbon         => _en ? 'Delete Cash Advance'   : 'Hapus Kasbon';

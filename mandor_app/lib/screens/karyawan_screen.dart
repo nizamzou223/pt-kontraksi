@@ -56,10 +56,10 @@ class _KaryawanScreenState extends State<KaryawanScreen> {
   List<Map<String, dynamic>> get _filtered {
     return _list.where((k) {
       final nama = (k['nama_karyawan'] ?? '').toString().toLowerCase();
-      final nik = (k['nik'] ?? k['id_karyawan'] ?? '').toString().toLowerCase();
+      final kode = (k['kode_karyawan'] ?? '').toString().toLowerCase();
       final golongan = ((k['jabatan'] as Map?)?['nama_jabatan'] ?? '').toString().toLowerCase();
       final q = _searchQ.toLowerCase();
-      final matchSearch = q.isEmpty || nama.contains(q) || nik.contains(q) || golongan.contains(q);
+      final matchSearch = q.isEmpty || nama.contains(q) || kode.contains(q) || golongan.contains(q);
       final matchStatus = _filterStatus == 'semua' ||
           (_filterStatus == 'aktif' && k['status_aktif'] == true) ||
           (_filterStatus == 'nonaktif' && k['status_aktif'] != true);
@@ -226,7 +226,7 @@ class _KaryawanCard extends StatelessWidget {
     final departemen = (data['departemen'] as Map?)?['nama_departemen'];
     final gajiHarian = (data['gaji_harian_override'] as num?) ??
         ((data['jabatan'] as Map?)?['gaji_harian'] as num?);
-    final nik = data['nik']?.toString() ?? data['id_karyawan']?.toString() ?? '-';
+    final kode = data['kode_karyawan']?.toString() ?? '-';
     final initials = (data['nama_karyawan'] as String? ?? '?')
         .split(' ')
         .take(2)
@@ -277,7 +277,7 @@ class _KaryawanCard extends StatelessWidget {
             Row(children: [
               Icon(Icons.badge_outlined, size: 11, color: context.cMuted),
               const SizedBox(width: 4),
-              Text('NIK: $nik',
+              Text('Kode: $kode',
                   style: TextStyle(fontSize: 15, color: context.cSub, fontFamily: 'monospace')),
             ]),
             const SizedBox(height: 3),
@@ -340,7 +340,6 @@ class _KaryawanFormSheetState extends State<_KaryawanFormSheet> {
   final _svc = PayrollService();
   final _formKey = GlobalKey<FormState>();
 
-  late final TextEditingController _nikCtrl;
   late final TextEditingController _namaCtrl;
   late final TextEditingController _gajiCtrl;
 
@@ -354,8 +353,6 @@ class _KaryawanFormSheetState extends State<_KaryawanFormSheet> {
   void initState() {
     super.initState();
     final d = widget.editData;
-    _nikCtrl = TextEditingController(
-        text: d != null ? (d['nik']?.toString() ?? d['id_karyawan']?.toString() ?? '') : '');
     _namaCtrl = TextEditingController(text: d?['nama_karyawan']?.toString() ?? '');
     _gajiCtrl = TextEditingController(
         text: d?['gaji_harian_override'] != null ? d!['gaji_harian_override'].toString() : '');
@@ -369,7 +366,6 @@ class _KaryawanFormSheetState extends State<_KaryawanFormSheet> {
 
   @override
   void dispose() {
-    _nikCtrl.dispose();
     _namaCtrl.dispose();
     _gajiCtrl.dispose();
     super.dispose();
@@ -403,7 +399,6 @@ class _KaryawanFormSheetState extends State<_KaryawanFormSheet> {
       final gajiStr = _gajiCtrl.text.trim();
       final payload = {
         'nama_karyawan': _namaCtrl.text.trim(),
-        'nik': _nikCtrl.text.trim(),
         'jabatan_id': _jabatanId,
         'departemen_id': _departemenId,
         'gaji_harian_override': gajiStr.isNotEmpty ? double.parse(gajiStr) : null,
@@ -463,7 +458,7 @@ class _KaryawanFormSheetState extends State<_KaryawanFormSheet> {
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(isEdit ? 'Edit Karyawan' : 'Tambah Karyawan',
                     style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: context.cText)),
-                Text(isEdit ? 'Perbarui data karyawan' : 'Isi NIK 16 digit karyawan',
+                Text(isEdit ? 'Perbarui data karyawan' : 'Lengkapi data karyawan baru',
                     style: TextStyle(fontSize: 15, color: context.cSub)),
               ])),
               GestureDetector(
@@ -485,28 +480,25 @@ class _KaryawanFormSheetState extends State<_KaryawanFormSheet> {
               child: Form(
                 key: _formKey,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  // NIK
                   const _SectionLabel('Data Diri'),
                   const SizedBox(height: 12),
-                  const _FieldLabel(label: 'NIK Karyawan', required: true),
-                  const SizedBox(height: 6),
-                  TextFormField(
-                    controller: _nikCtrl,
-                    style: TextStyle(fontSize: 17, color: context.cText),
-                    keyboardType: TextInputType.number,
-                    maxLength: 16,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: _inputDecor(context, hint: '16 digit NIK').copyWith(counterText: ''),
-                    validator: (v) {
-                      final s = v?.trim() ?? '';
-                      if (s.isEmpty) return 'NIK wajib diisi';
-                      if (!RegExp(r'^\d{16}$').hasMatch(s)) return 'NIK harus tepat 16 digit angka';
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 4),
-                  Text('NIK harus 16 digit angka dan unik untuk setiap karyawan',
-                      style: TextStyle(fontSize: 15, color: context.cMuted)),
+                  if (isEdit) ...[
+                    const _FieldLabel(label: 'Kode Karyawan', required: false),
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: context.cBorder.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text('${widget.editData?['kode_karyawan'] ?? '-'}',
+                          style: TextStyle(fontSize: 17, color: context.cText)),
+                    ),
+                    const SizedBox(height: 16),
+                  ] else
+                    Text('Kode Karyawan akan dibuat otomatis setelah disimpan.',
+                        style: TextStyle(fontSize: 15, color: context.cMuted)),
                   const SizedBox(height: 16),
 
                   // Nama
