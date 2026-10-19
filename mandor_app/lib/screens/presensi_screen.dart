@@ -30,7 +30,9 @@ class _PresensiScreenState extends State<PresensiScreen>
 
   // Data
   List<Map<String, dynamic>> _presensiHarian =
-      []; // presensi hari ini (semua karyawan)
+      []; // presensi hari ini DI PROJECT INI (+ alfa otomatis tanpa project)
+  List<Map<String, dynamic>> _semuaPresensi =
+      []; // presensi hari ini di SEMUA project (1 baris per karyawan)
   List<Map<String, dynamic>> _semuaKaryawan = []; // master karyawan aktif
   bool _loading = true;
   bool _alfaAutoMarked = false; // cukup 1x per sesi
@@ -69,10 +71,22 @@ class _PresensiScreenState extends State<PresensiScreen>
         _svc.getPresensiHarian(_tanggal),
         _svc.getAllKaryawan(),
       ]);
+      // Karyawan fleksibel: semua karyawan aktif bisa diinput di project ini.
+      // Yang dihitung "di project ini" hanya presensi ber-project_id ini, plus
+      // alfa otomatis (tanpa project). Presensi di project lain dipisah
+      // (_diProjectLainCount) supaya tidak ikut terhitung di sini.
+      final aktifIds = (karyawan as List).map((k) => k['id'] as int).toSet();
+      final pid = widget.project['id'];
+      final semua = List<Map<String, dynamic>>.from(presensi as List)
+          .where((p) => aktifIds.contains(p['karyawan_id']))
+          .toList();
       if (mounted) {
         setState(() {
-          _presensiHarian = List<Map<String, dynamic>>.from(presensi as List);
-          _semuaKaryawan = List<Map<String, dynamic>>.from(karyawan as List);
+          _semuaPresensi = semua;
+          _presensiHarian = semua
+              .where((p) => p['project_id'] == null || p['project_id'] == pid)
+              .toList();
+          _semuaKaryawan = List<Map<String, dynamic>>.from(karyawan);
           _loading = false;
         });
       }
@@ -100,14 +114,30 @@ class _PresensiScreenState extends State<PresensiScreen>
       .where((p) =>
           p['status_kehadiran'] == 'belum_lengkap' && p['jam_masuk'] != null)
       .length;
-  int get _tidakHadirCount => _presensiHarian
-      .where((p) =>
-          p['status_kehadiran'] != 'hadir' &&
-          !(p['status_kehadiran'] == 'belum_lengkap' && p['jam_masuk'] != null))
-      .length;
+  // Hari kerja (Senin–Sabtu) yang sudah lewat: karyawan yang tidak punya
+  // presensi sama sekali dihitung Tidak Hadir, bukan dibiarkan "Belum Input".
+  bool get _belumInputJadiAlfa {
+    final tgl = DateTime.parse(_tanggal);
+    return tgl.isBefore(DateTime.parse(_today())) &&
+        tgl.weekday != DateTime.sunday;
+  }
 
+  int get _tidakHadirCount =>
+      _presensiHarian
+          .where((p) =>
+              p['status_kehadiran'] != 'hadir' &&
+              !(p['status_kehadiran'] == 'belum_lengkap' &&
+                  p['jam_masuk'] != null))
+          .length +
+      (_belumInputJadiAlfa ? _belumTercatat.length : 0);
+
+  // Karyawan yang hari ini sudah tercatat di project mana pun
   Set<int> get _tercatatIds =>
-      _presensiHarian.map((p) => p['karyawan_id'] as int).toSet();
+      _semuaPresensi.map((p) => p['karyawan_id'] as int).toSet();
+  // Total di project ini = tercatat di sini + belum tercatat di mana pun.
+  // Karyawan yang tercatat di project lain tidak dihitung, jadi project yang
+  // tidak punya presensi tampil kosong (0).
+  int get _totalDiProject => _presensiHarian.length + _belumTercatat.length;
   List<Map<String, dynamic>> get _belumTercatat => _semuaKaryawan
       .where((k) => !_tercatatIds.contains(k['id'] as int))
       .toList();
@@ -466,10 +496,11 @@ class _PresensiScreenState extends State<PresensiScreen>
                           _StatChip('Tidak Hadir', _tidakHadirCount,
                               const Color(0xFFDC2626), const Color(0xFFFEE2E2)),
                           const SizedBox(width: 8),
-                          _StatChip('Belum Input', _belumTercatat.length,
+                          _StatChip('Belum Input',
+                              _belumInputJadiAlfa ? 0 : _belumTercatat.length,
                               const Color(0xFFD97706), const Color(0xFFFEF9C3)),
                           const SizedBox(width: 8),
-                          _StatChip('Total', _semuaKaryawan.length,
+                          _StatChip('Total', _totalDiProject,
                               AppColors.brand600, AppColors.brand50),
                         ]),
                       ),

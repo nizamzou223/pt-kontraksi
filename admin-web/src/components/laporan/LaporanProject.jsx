@@ -31,6 +31,18 @@ function exportCSV(rows, filename) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = filename; a.click()
 }
 
+// Ambil SEMUA baris — API membatasi 1000 baris per request, sedangkan presensi
+// satu project sebulan bisa ribuan baris (laporan jadi terpotong diam-diam).
+async function fetchAll(buildQuery, pageSize = 1000) {
+  const rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data || []))
+    if (!data || data.length < pageSize) return rows
+  }
+}
+
 function MiniStat({ label, value, sub, color = 'blue', icon: Icon }) {
   const clr = {
     blue: 'bg-blue-50 border-blue-100 text-blue-700', green: 'bg-green-50 border-green-100 text-green-700',
@@ -137,7 +149,7 @@ export default function LaporanProject() {
 
       const [proj, prs, lb, kb, sm, sk, pm, anggota] = await Promise.all([
         supabase.from('project').select('*, karyawan!project_manager_id(nama_karyawan, jabatan(nama_jabatan))').eq('id', pid).single().then(r => r.data),
-        supabase.from('presensi').select('karyawan_id, tanggal, status_kehadiran, durasi_jam, uang_makan, uang_transport, upah_luar_kota, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal', periodeStart).lte('tanggal', periodeEnd).order('tanggal', { ascending: false }).then(r => r.data || []),
+        fetchAll(() => supabase.from('presensi').select('id, karyawan_id, tanggal, status_kehadiran, durasi_jam, uang_makan, uang_transport, upah_luar_kota, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal', periodeStart).lte('tanggal', periodeEnd).order('tanggal', { ascending: false }).order('id')),
         supabase.from('lembur').select('id, tanggal, durasi_jam, total_lembur, status_persetujuan, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal', periodeStart).lte('tanggal', periodeEnd).order('tanggal', { ascending: false }).then(r => r.data || []),
         supabase.from('kasbon').select('id, tanggal_kasbon, jumlah_kasbon, sisa_kasbon, status_lunas, catatan, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).gte('tanggal_kasbon', periodeStart).lte('tanggal_kasbon', periodeEnd).order('tanggal_kasbon', { ascending: false }).then(r => r.data || []),
         supabase.from('stok_masuk').select('id, jumlah, catatan, created_at, barang(nama_barang, kode_barang, satuan_barang(singkatan))').eq('project_id', pid).gte('created_at', periodeStart).lte('created_at', dateEnd).order('created_at', { ascending: false }).then(r => r.data || []),
@@ -146,19 +158,29 @@ export default function LaporanProject() {
         supabase.from('project_karyawan').select('tanggal_mulai, status_assignment, catatan, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))').eq('project_id', pid).eq('status_assignment', 'aktif').then(r => r.data || []),
       ])
 
-      // Rekap gaji per project: ambil dari rekap_gaji_mingguan karyawan yg ada di project ini
-      // Filter berdasarkan project_details JSONB
-      const karyawanIds = anggota.map(a => a.karyawan?.kode_karyawan ? a.karyawan : null).filter(Boolean)
-      // Ambil ID dari project_karyawan
-      const { data: pkData } = await supabase.from('project_karyawan')
-        .select('karyawan_id').eq('project_id', pid)
-      const pKids = (pkData || []).map(x => x.karyawan_id)
-
-      // Rekap gaji mingguan karyawan di project ini, di periode ini
-      const { data: gajiRows } = await supabase.from('rekap_gaji_mingguan')
+      // Rekap gaji project ini: karyawan fleksibel (tidak harus ditugaskan via
+      // project_karyawan), jadi ambil rekap mingguan yang project_details-nya
+      // memuat project ini. Minggu dikelompokkan by periode_selesai (sama
+      // seperti Gaji Bulanan). Bila seminggu kerja di beberapa project, nilai
+      // dibagi proporsional jumlah hari di project ini.
+      const semuaRekap = await fetchAll(() => supabase.from('rekap_gaji_mingguan')
         .select('*, karyawan(nama_karyawan, kode_karyawan, jabatan(nama_jabatan))')
-        .in('karyawan_id', pKids.length > 0 ? pKids : [0])
-        .gte('periode_mulai', periodeStart).lte('periode_selesai', periodeEnd)
+        .in('status', ['draft', 'dibayar'])
+        .gte('periode_selesai', periodeStart).lte('periode_selesai', periodeEnd)
+        .order('id'))
+      const gajiRows = semuaRekap.flatMap(g => {
+        const pd = g.project_details?.[String(pid)]
+        if (!pd) return []
+        const totalHari = parseInt(g.total_hari_hadir || 0)
+        const share = totalHari > 0 ? Math.min(1, (pd.hari || 0) / totalHari) : 1
+        const bagi = v => Math.round(parseFloat(v || 0) * share)
+        return [{
+          ...g,
+          total_hari_hadir: pd.hari ?? totalHari,
+          gaji_bersih: bagi(g.gaji_bersih), gaji_kotor: bagi(g.gaji_kotor),
+          total_uang_lembur: bagi(g.total_uang_lembur), total_potongan_kasbon: bagi(g.total_potongan_kasbon),
+        }]
+      })
 
       setProjectDetail(proj)
       setPresensiData(prs)
@@ -181,6 +203,9 @@ export default function LaporanProject() {
   const hadirRows = presensiData.filter(p => p.status_kehadiran === 'hadir')
   const uniqueHadir = new Set(hadirRows.map(p => p.karyawan_id)).size
   const totalHariKerja = hadirRows.length
+  // Karyawan fleksibel: "aktif di project" = pernah tercatat presensi di project
+  // ini pada periode (bukan dari tabel penugasan project_karyawan)
+  const karyawanTercatat = new Set(presensiData.map(p => p.karyawan_id)).size
 
   // Kehadiran per karyawan + dikelompokkan per jabatan
   const hadirPerKaryawan = {}
@@ -213,7 +238,10 @@ export default function LaporanProject() {
   })()
 
   const gajiBayar = gajiMingguanData.filter(g => g.status === 'dibayar')
-  const totalGajiBersih = gajiBayar.reduce((s, g) => s + parseFloat(g.gaji_bersih || 0), 0)
+  const gajiDraft = gajiMingguanData.filter(g => g.status === 'draft')
+  // Total gaji periode = sudah dibayar + draft (belum dibayar), rincian di sub-teks
+  const totalGajiBersih = gajiMingguanData.reduce((s, g) => s + parseFloat(g.gaji_bersih || 0), 0)
+  const totalGajiDibayar = gajiBayar.reduce((s, g) => s + parseFloat(g.gaji_bersih || 0), 0)
   const totalLemburNilai = lemburData.reduce((s, l) => s + parseFloat(l.total_lembur || 0), 0)
   const totalLemburJam = lemburData.reduce((s, l) => s + parseFloat(l.durasi_jam || 0), 0)
   const lemburDisetujui = lemburData.filter(l => l.status_persetujuan === 'disetujui')
@@ -284,7 +312,7 @@ export default function LaporanProject() {
               <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-right shrink-0">
                 {project.budget_total > 0 && <div><p className="text-blue-200 text-xs uppercase tracking-wide">Budget Total</p><p className="text-lg font-extrabold">{formatRupiah(project.budget_total)}</p></div>}
                 <div><p className="text-blue-200 text-xs uppercase tracking-wide">Pengeluaran Periode</p><p className="text-lg font-extrabold">{formatRupiah(totalPengeluaran)}</p></div>
-                <div><p className="text-blue-200 text-xs uppercase tracking-wide">Karyawan Aktif</p><p className="text-lg font-extrabold">{karyawanProject.length} orang</p></div>
+                <div><p className="text-blue-200 text-xs uppercase tracking-wide">Karyawan Aktif</p><p className="text-lg font-extrabold">{karyawanTercatat} orang</p></div>
                 <div><p className="text-blue-200 text-xs uppercase tracking-wide">Status</p><p className="text-lg font-extrabold capitalize">{project.status_project}</p></div>
               </div>
             </div>
@@ -305,7 +333,8 @@ export default function LaporanProject() {
           <div>
             <SectionTitle icon={Wallet} title="Ringkasan Pengeluaran Periode" color="text-blue-700" />
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MiniStat label="Total Gaji Dibayar" value={formatRupiah(totalGajiBersih)} color="blue" icon={DollarSign} sub={`${gajiBayar.length} rekap`} />
+              <MiniStat label="Total Gaji" value={formatRupiah(totalGajiBersih)} color="blue" icon={DollarSign}
+                sub={`${formatRupiah(totalGajiDibayar)} dibayar · ${gajiDraft.length} rekap draft`} />
               <MiniStat label="Total Lembur" value={formatRupiah(totalLemburDisetujui)} color="green" icon={TrendingUp} sub={`${totalLemburJam.toFixed(1)} jam`} />
               <MiniStat label="Total Kasbon" value={formatRupiah(totalKasbonNilai)} color="amber" icon={CreditCard} sub={`${kasbonOutstanding} outstanding`} />
               <MiniStat label="Total Pengeluaran" value={formatRupiah(totalPengeluaran)} color="indigo" icon={Activity} />
@@ -324,7 +353,7 @@ export default function LaporanProject() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
               <MiniStat label="Karyawan Hadir" value={`${uniqueHadir} orang`} color="blue" icon={Users} />
               <MiniStat label="Total Hari Kehadiran" value={`${totalHariKerja} hari`} color="teal" icon={Calendar} />
-              <MiniStat label="Anggota Aktif Project" value={`${karyawanProject.length} orang`} color="slate" icon={UserCheck} />
+              <MiniStat label="Karyawan Tercatat" value={`${karyawanTercatat} orang`} color="slate" icon={UserCheck} sub="hadir / izin / sakit / alfa" />
               <MiniStat label="Rata-rata Kehadiran" value={uniqueHadir > 0 ? `${(totalHariKerja / uniqueHadir).toFixed(1)} hr/org` : '-'} color="purple" icon={BarChart2} />
             </div>
             {kehadiranList.length > 0 && (

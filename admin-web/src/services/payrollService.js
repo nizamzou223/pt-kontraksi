@@ -8,6 +8,7 @@
  * FIX 6: getGajiBulanan select kolom baru agar UI bisa menampilkan breakdown
  */
 import supabase from './supabaseClient'
+import { getWeekRange } from '../utils/constants'
 
 const parseError = (e) => {
   const msg = e?.message || ''
@@ -848,6 +849,15 @@ export const payrollService = {
       .lte('periode_selesai', tglAkhir)
 
     if (error) throw new Error(parseError(error))
+
+    // Hapus baris bulanan yang sudah tidak punya rekap mingguan (mis. presensinya
+    // dihapus/diganti) supaya Gaji Bulanan tidak menampilkan angka basi.
+    const adaMingguan = [...new Set((mingguan || []).map(g => g.karyawan_id))]
+    let hapusBasi = supabase.from('rekap_gaji_bulanan').delete().eq('bulan', bulan).eq('tahun', tahun)
+    if (adaMingguan.length) hapusBasi = hapusBasi.not('karyawan_id', 'in', `(${adaMingguan.join(',')})`)
+    const { error: hapusErr } = await hapusBasi
+    if (hapusErr) console.warn('hapus rekap bulanan basi:', hapusErr.message)
+
     if (!mingguan?.length) return 0
 
     const byK = {}
@@ -890,6 +900,40 @@ export const payrollService = {
       .upsert(rows, { onConflict: 'karyawan_id,bulan,tahun' })
     if (upsertErr) console.warn('rekap_gaji_bulanan upsert:', upsertErr.message)
     return rows.length
+  },
+
+  // ============================================================
+  // SINKRON BULANAN PENUH: hitung ulang SEMUA minggu (Senin–Sabtu) yang
+  // Sabtunya jatuh di bulan ini — dari presensi, untuk semua karyawan aktif —
+  // lalu rekap ke bulanan. Tanpa ini Gaji Bulanan hanya menjumlah rekap
+  // mingguan yang kebetulan sudah pernah dibuka di halaman Gaji Mingguan.
+  // Minggu yang belum dimulai dilewati; gaji 'dibayar' tidak disentuh.
+  // ============================================================
+  async sinkronBulanan(bulan, tahun) {
+    const { data: aktif, error } = await supabase.from('karyawan').select('id').eq('status_aktif', true)
+    if (error) throw new Error(parseError(error))
+    const ids = (aktif || []).map(k => k.id)
+
+    const hariIni = getWeekRange(new Date()).end   // Sabtu minggu berjalan
+    const minggu = []
+    const lastDay = new Date(tahun, bulan, 0).getDate()
+    for (let d = 1; d <= lastDay; d++) {
+      const tgl = new Date(tahun, bulan - 1, d)
+      if (tgl.getDay() !== 6) continue              // hanya Sabtu
+      const range = getWeekRange(tgl)
+      if (range.end > hariIni) break                // minggu belum berjalan
+      minggu.push(range)
+    }
+
+    let diubah = 0
+    if (ids.length) {
+      for (const m of minggu) {
+        const res = await payrollService.hitungDanSimpanGajiMingguanBatch(ids, m.start, m.end)
+        diubah += res.diubah
+      }
+    }
+    await payrollService._autoRekapBulanan(bulan, tahun)
+    return { minggu: minggu.length, diubah }
   },
 
   // Helper: rekap mingguan dalam satu bulan (by periode_selesai), termasuk draft

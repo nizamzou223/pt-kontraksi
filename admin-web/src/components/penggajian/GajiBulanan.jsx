@@ -38,9 +38,12 @@ export default function GajiBulanan() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     try {
-      await payrollService._autoRekapBulanan(parseInt(bulan), parseInt(tahun))
+      // Buka halaman / ganti bulan: hitung ulang semua minggu dari presensi.
+      // Refresh berkala (silent) cukup rekap ulang dari mingguan — lebih ringan.
+      if (silent) await payrollService._autoRekapBulanan(parseInt(bulan), parseInt(tahun))
+      else        await payrollService.sinkronBulanan(parseInt(bulan), parseInt(tahun))
     } catch (e) {
-      console.warn('autoRekapBulanan:', e?.message)
+      console.warn('sinkron bulanan:', e?.message)
     }
     try {
       const [fresh, mingguanList] = await Promise.all([
@@ -79,14 +82,15 @@ export default function GajiBulanan() {
   const handleSinkronManual = async () => {
     setSyncing(true)
     try {
-      await payrollService._autoRekapBulanan(parseInt(bulan), parseInt(tahun))
+      const { minggu } = await payrollService.sinkronBulanan(parseInt(bulan), parseInt(tahun))
       const [fresh, mingguanList] = await Promise.all([
         payrollService.getGajiBulanan({ bulan, tahun }),
         payrollService.getGajiMingguanByBulan(parseInt(bulan), parseInt(tahun)),
       ])
       setData(fresh || [])
       setWeeklyMap(buildWeeklyMap(mingguanList))
-      toast.success(`Sinkron selesai — ${(fresh || []).length} karyawan`)
+      toast.success(`Sinkron selesai — ${minggu} minggu, ${(fresh || []).length} karyawan`)
+      syncBus.emitAll('gaji')
     } catch (e) { toast.error(e.message) } finally { setSyncing(false) }
   }
 

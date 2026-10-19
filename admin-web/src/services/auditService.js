@@ -55,14 +55,20 @@ export const reportService = {
 
   async getKehadiranStats(projectId, bulan, tahun) {
     const start = `${tahun}-${String(bulan).padStart(2, '0')}-01`
-    const end = new Date(tahun, bulan, 0).toISOString().split('T')[0]
-    let query = supabase.from('presensi')
-      .select('status_kehadiran, tanggal')
-      .gte('tanggal', start).lte('tanggal', end)
-    if (projectId) query = query.eq('project_id', projectId)
-    const { data } = await query
+    // Jangan pakai toISOString() di sini: di WIB, tengah malam lokal jatuh ke hari sebelumnya di UTC.
+    const end = `${tahun}-${String(bulan).padStart(2, '0')}-${String(new Date(tahun, bulan, 0).getDate()).padStart(2, '0')}`
     const stats = { hadir: 0, sakit: 0, izin: 0, cuti: 0, libur: 0, alfa: 0 }
-    data?.forEach(p => { if (stats[p.status_kehadiran] !== undefined) stats[p.status_kehadiran]++ })
+    // Hitung per status lewat count di server — select biasa terpotong 1000 baris
+    // (batas API), sehingga bulan dengan >1000 presensi (mis. alfa otomatis) timpang.
+    await Promise.all(Object.keys(stats).map(async (status) => {
+      let query = supabase.from('presensi')
+        .select('id', { count: 'exact', head: true })
+        .eq('status_kehadiran', status)
+        .gte('tanggal', start).lte('tanggal', end)
+      if (projectId) query = query.eq('project_id', projectId)
+      const { count } = await query
+      stats[status] = count || 0
+    }))
     return stats
   },
 

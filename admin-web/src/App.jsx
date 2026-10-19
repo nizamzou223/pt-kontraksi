@@ -217,7 +217,10 @@ function AppLayout() {
   }, [])
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    // 100dvh = tinggi layar yang benar-benar terlihat. h-screen (100vh) di Chrome
+    // Android ikut menghitung area di balik bilah alamat/navigasi, jadi bagian
+    // bawah terpotong. Browser lama yang belum kenal dvh memakai h-screen.
+    <div className="flex h-screen overflow-hidden bg-gray-50" style={{ height: '100dvh' }}>
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-20 bg-black/40 backdrop-blur-sm lg:hidden"

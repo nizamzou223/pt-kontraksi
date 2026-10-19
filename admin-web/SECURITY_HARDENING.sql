@@ -133,10 +133,15 @@ BEGIN
 END $$;
 
 -- 3a-2. SDM/gaji lapangan: admin/hr semua proyek; mandor hanya proyeknya; mandor_gudang DITOLAK
+-- Presensi dikecualikan: karyawan bebas bekerja di project mana pun, jadi
+-- mandor melihat/menginput presensi SEMUA project (FIX_PRESENSI_FLEKSIBEL_MANDOR.sql).
+CREATE POLICY presensi_field_all ON public.presensi FOR ALL TO authenticated
+  USING (is_field_writer()) WITH CHECK (is_field_writer());
+
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['presensi','lembur','kasbon'] LOOP
+  FOREACH t IN ARRAY ARRAY['lembur','kasbon'] LOOP
     EXECUTE format(
       'CREATE POLICY %I ON public.%I FOR ALL TO authenticated
          USING (can_access_field_project(project_id))

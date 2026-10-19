@@ -30,6 +30,7 @@ const fmtRp = (v) => v > 0 ? `Rp ${Number(v).toLocaleString('id-ID')}` : null
 export default function PresensiList() {
   const { activeProject } = useProject()
   const [data,           setData]           = useState([])
+  const [allData,        setAllData]        = useState([])  // semua project (untuk deteksi "di project lain")
   const [karyawan,       setKaryawan]       = useState([])   // Karyawan aktif (scope terpilih) untuk tracking kehadiran
   const [allKaryawan,    setAllKaryawan]    = useState([])   // Semua karyawan aktif untuk dropdown form
   const [projects,       setProjects]       = useState([])
@@ -73,8 +74,8 @@ export default function PresensiList() {
         project:project_id(nama_project, kode_project)
       `).eq('tanggal', filterTanggal).order('karyawan_id')
 
-      if (scopeProjectId) q = q.eq('project_id', scopeProjectId)
-
+      // Selalu ambil SEMUA project: karyawan fleksibel, jadi yang tercatat di
+      // project lain harus dikenali (bukan dianggap "Belum Input") saat filter aktif.
       const [presRes, projRes, karRes] = await Promise.all([
         q,
         supabase.from('project').select('id, nama_project, kode_project, status_project').order('nama_project'),
@@ -83,11 +84,17 @@ export default function PresensiList() {
 
       const karList = karRes || []
 
-      setData(presRes.data || [])
+      const semua = presRes.data || []
+      // Di project terpilih: presensi project itu + alfa otomatis (tanpa project)
+      const presensiData = scopeProjectId
+        ? semua.filter(p => p.project_id === scopeProjectId || p.project_id == null)
+        : semua
+      setAllData(semua)
+      setData(presensiData)
       setKaryawan(karList)
       setProjects(projRes.data || [])
       setLastRefresh(new Date())
-      return { presensiData: presRes.data || [], karyawanList: karList }
+      return { presensiData, karyawanList: karList }
     } catch (e) {
       if (!silent) toast.error('Gagal memuat: ' + e.message)
     } finally {
@@ -212,8 +219,13 @@ export default function PresensiList() {
   // ─── Derived state ───────────────────────────────────────────────────────
   const sudahLewat    = isTanggalLewat(filterTanggal)
   const isHariIni     = isToday(filterTanggal)
-  const tercatatIds   = new Set(data.map(d => d.karyawan_id))
+  // Tercatat di project mana pun hari itu — bukan "Belum Input" walau beda project
+  const tercatatIds   = new Set(allData.map(d => d.karyawan_id))
   const tidakTercatat = karyawan.filter(k => !tercatatIds.has(k.id))
+  // Filter project aktif: total = tercatat di project itu + belum tercatat di
+  // mana pun (yang bekerja di project lain tidak ikut) -> project tanpa
+  // presensi tampil kosong. Tanpa filter: semua karyawan aktif.
+  const totalKaryawanView = filterProject ? data.length + tidakTercatat.length : karyawan.length
   const selesaiCount       = data.filter(d => d.status_kehadiran === 'hadir').length
   const sedangBekerjaCount = data.filter(d => d.status_kehadiran === 'belum_lengkap' && d.jam_masuk).length
   const tidakHadirDB       = data.filter(d => d.status_kehadiran !== 'hadir' && !(d.status_kehadiran === 'belum_lengkap' && d.jam_masuk)).length
@@ -322,7 +334,7 @@ export default function PresensiList() {
           { label: isHariIni ? 'Belum Input' : 'Tidak Tercatat', val: tidakTercatat.length, Icon: Clock,
             bg: tidakTercatat.length > 0 ? 'bg-amber-50 border-amber-100' : 'bg-gray-50 border-gray-100',
             num: tidakTercatat.length > 0 ? 'text-amber-700' : 'text-gray-400' },
-          { label: 'Total Karyawan', val: karyawan.length,   Icon: Users,  bg: 'bg-blue-50 border-blue-100',   num: 'text-blue-700'  },
+          { label: 'Total Karyawan', val: totalKaryawanView, Icon: Users,  bg: 'bg-blue-50 border-blue-100',   num: 'text-blue-700'  },
         ].map(s => (
           <div key={s.label} className={`rounded-2xl border p-4 flex items-center gap-3 ${s.bg}`}>
             <div className="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center flex-shrink-0 shadow-sm">

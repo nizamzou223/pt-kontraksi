@@ -57,7 +57,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final monthStart = AppFormatter.monthStart();
 
       final results = await Future.wait([
-        _svc.getPresensi(projectId: pid, tanggal: today),
+        // Semua project (de-duplikasi per karyawan) — sama dengan cakupan
+        // getAllKaryawan, supaya Hadir + Tidak Hadir = Total Karyawan.
+        _svc.getPresensiHarian(today),
         _svc.getLembur(projectId: pid, status: 'pending'),
         _svc.getKasbon(projectId: pid),
         _svc.getAllKaryawan(),
@@ -81,20 +83,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
               (k['tanggal_kasbon'] as String? ?? '').compareTo(monthStart) >= 0)
           .toList();
 
-      final presensiMonth = await _svc.getPresensi(
-          projectId: pid, tanggalDari: monthStart, tanggalSampai: today);
-      final hadirMonth =
-          presensiMonth.where((p) => p['status_kehadiran'] == 'hadir').length;
+      // Fokus per project: hanya presensi DI PROJECT INI (+ alfa otomatis
+      // tanpa project) dan karyawan yang belum tercatat di mana pun.
+      // Karyawan yang tercatat di project lain tidak dihitung, jadi project
+      // tanpa presensi tampil kosong. Hadir + Tidak Hadir = Total.
+      final aktifIds = karyawan.map((k) => k['id'] as int).toSet();
+      final presensiAktif =
+          presensi.where((p) => aktifIds.contains(p['karyawan_id'])).toList();
+      final tercatatIds =
+          presensiAktif.map((p) => p['karyawan_id'] as int).toSet();
+      final presensiProject = presensiAktif
+          .where((p) => p['project_id'] == null || p['project_id'] == pid)
+          .toList();
+      final belumTercatat =
+          aktifIds.where((id) => !tercatatIds.contains(id)).length;
+      final hadirHariIni = presensiProject
+          .where((p) =>
+              p['status_kehadiran'] == 'hadir' ||
+              (p['status_kehadiran'] == 'belum_lengkap' &&
+                  p['jam_masuk'] != null))
+          .length;
+      final totalDiProject = presensiProject.length + belumTercatat;
+
+      // Dihitung di server (count) — baris presensi sebulan bisa >1000,
+      // melewati batas baris API bila diambil satu per satu.
+      final [totalMonth, hadirMonth] = await Future.wait([
+        _svc.countPresensi(
+            tanggalDari: monthStart, tanggalSampai: today, projectId: pid),
+        _svc.countPresensi(
+            tanggalDari: monthStart,
+            tanggalSampai: today,
+            status: 'hadir',
+            projectId: pid),
+      ]);
 
       if (mounted) {
         setState(() {
           _stats = {
-            'hadir':
-                presensi.where((p) => p['status_kehadiran'] == 'hadir').length,
-            'tidakHadir':
-                presensi.where((p) => p['status_kehadiran'] != 'hadir').length,
-            'totalPresensi': presensi.length,
-            'totalKaryawan': karyawan.length,
+            'hadir': hadirHariIni,
+            'tidakHadir': totalDiProject - hadirHariIni,
+            'totalPresensi': presensiProject.length,
+            'totalKaryawan': totalDiProject,
             'lemburPending': lembur.length,
             'kasbonBulan': kasbonBulan.length,
             'totalKasbonRp': kasbonBulan.fold<double>(
@@ -103,9 +132,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 .where((k) => k['status_lunas'] == false)
                 .fold<double>(0,
                     (s, k) => s + (k['sisa_kasbon'] as num? ?? 0).toDouble()),
-            'attendanceRate': presensiMonth.isEmpty
+            'attendanceRate': totalMonth == 0
                 ? 0
-                : (hadirMonth / presensiMonth.length * 100).round(),
+                : (hadirMonth / totalMonth * 100).round(),
           };
           _loading = false;
         });

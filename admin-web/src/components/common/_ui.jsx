@@ -404,7 +404,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
         fixed top-0 left-0 h-full w-64 z-30 flex flex-col
         transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]
         ${isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
-      `} style={{ background: sd.bg, borderRight: `1px solid ${sd.border}` }}>
+      `} style={{ height: '100dvh', background: sd.bg, borderRight: `1px solid ${sd.border}` }}>
 
         {/* Top accent line */}
         <div className="absolute top-0 left-0 right-0 h-1 rounded-none"

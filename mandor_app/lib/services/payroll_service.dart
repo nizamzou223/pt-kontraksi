@@ -128,6 +128,24 @@ class PayrollService {
     } catch (e) { throw Exception(_err(e)); }
   }
 
+  // ── JUMLAH PRESENSI (count di server, tanpa batas 1000 baris) ─
+  Future<int> countPresensi({
+    String? tanggalDari,
+    String? tanggalSampai,
+    String? status,
+    int? projectId,
+  }) async {
+    try {
+      var q = _client.from('presensi').select('id');
+      if (projectId != null) q = q.eq('project_id', projectId);
+      if (tanggalDari != null) q = q.gte('tanggal', tanggalDari);
+      if (tanggalSampai != null) q = q.lte('tanggal', tanggalSampai);
+      if (status != null) q = q.eq('status_kehadiran', status);
+      final res = await q.count(CountOption.exact);
+      return res.count;
+    } catch (e) { throw Exception(_err(e)); }
+  }
+
   // ── PRESENSI SEMUA KARYAWAN UNTUK TANGGAL TERTENTU ─────────
   // De-duplikasi: jika 1 karyawan punya 2 record (project berbeda), prioritas hadir
   Future<List<Map<String, dynamic>>> getPresensiHarian(String tanggal) async {
