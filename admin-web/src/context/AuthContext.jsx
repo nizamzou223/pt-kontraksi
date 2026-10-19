@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react'
 import supabase from '../services/supabaseClient'
 import { resolveWebUser, ACCESS_DENIED_MESSAGES } from '../utils/security'
+import LogoutSuccessOverlay, { LOGOUT_ANIM_MS } from '../components/auth/LogoutSuccessOverlay'
 
 const AuthContext = createContext(null)
 
@@ -14,6 +15,7 @@ function authError(code, message) {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(undefined)
   const [loading, setLoading] = useState(true)
+  const [logoutAnim, setLogoutAnim] = useState(null)  // { name, closing } saat animasi logout tampil
   const userRef = useRef(null)
   const initDone = useRef(false)
 
@@ -147,10 +149,20 @@ export const AuthProvider = ({ children }) => {
     return data
   }
 
+  // Logout dengan animasi "Berhasil Keluar": overlay diputar dulu, baru sesi
+  // diakhiri (halaman login tampil di belakang), lalu overlay memudar.
   const logout = async () => {
+    if (logoutAnim) return
+    setLogoutAnim({ name: user?.nama_lengkap || user?.email, closing: false })
+    await new Promise(r => setTimeout(r, LOGOUT_ANIM_MS))
     userRef.current = null
     setUser(null)
-    await supabase.auth.signOut()
+    try {
+      await supabase.auth.signOut()
+    } finally {
+      setLogoutAnim(a => a && { ...a, closing: true })
+      setTimeout(() => setLogoutAnim(null), 350)
+    }
   }
 
   const isAdmin  = () => user?.role === 'admin'
@@ -160,6 +172,7 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, isAdmin, isHR, isMandor }}>
       {children}
+      {logoutAnim && <LogoutSuccessOverlay userName={logoutAnim.name} closing={logoutAnim.closing} />}
     </AuthContext.Provider>
   )
 }

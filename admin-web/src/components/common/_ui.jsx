@@ -540,7 +540,7 @@ export const Sidebar = ({ isOpen, onClose }) => {
         open={showLogoutConfirm}
         userName={user?.nama_lengkap || user?.email || 'Admin'}
         onCancel={() => setShowLogoutConfirm(false)}
-        onConfirm={async () => { await logout(); setShowLogoutConfirm(false) }}
+        onConfirm={async () => { setShowLogoutConfirm(false); await logout() }}
       />
     </>
   )

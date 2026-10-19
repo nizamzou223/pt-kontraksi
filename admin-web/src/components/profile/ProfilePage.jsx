@@ -578,7 +578,7 @@ export default function ProfilePage() {
       <LogoutDialog
         open={showLogout}
         onCancel={() => setShowLogout(false)}
-        onConfirm={async () => { await logout(); setShowLogout(false) }}
+        onConfirm={async () => { setShowLogout(false); await logout() }}
         userName={displayUser?.nama_lengkap || displayUser?.email}
         c={c} s={s}
       />
